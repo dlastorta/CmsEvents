@@ -1,0 +1,361 @@
+### CmsEvents Service — Sample requests
+###
+### Idiomatic ".http" file readable by:
+###   - Visual Studio 2022 (17.8+) — built-in
+###   - JetBrains Rider — built-in
+###   - VS Code + "REST Client" extension (humao.rest-client)
+###
+### Prerequisites:
+###   1. Service running per README Quick Start (http://localhost:5000)
+###   2. Local dev seed users active (cms-webhook-user / readonly-user / admin-user)
+###
+### =============================================================
+### ONE-TIME SETUP: fill in the three @*Auth variables below
+### =============================================================
+### The values must be Base64-encoded "<username>:<password>" strings using
+### the plaintext password YOU chose when running tools/BcryptHash during setup.
+### NEVER commit real credentials to the repo — leave the placeholders in place
+### and either edit locally (this file is fine to modify without committing) OR
+### use a .env / .rest-client.env.json for per-developer overrides.
+###
+### Compute the three Base64 strings:
+###
+###   PowerShell:
+###     $pwd = "YourLocalDevPassword"
+###     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("cms-webhook-user:$pwd"))
+###     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("readonly-user:$pwd"))
+###     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("admin-user:$pwd"))
+###
+###   bash / zsh:
+###     PASSWORD="YourLocalDevPassword"
+###     printf 'cms-webhook-user:%s' "$PASSWORD" | base64
+###     printf 'readonly-user:%s'    "$PASSWORD" | base64
+###     printf 'admin-user:%s'       "$PASSWORD" | base64
+###
+### Paste the three outputs into the placeholders below.
+###
+### Walk-through scenarios with expected DB state in samples/scenarios.md.
+
+@baseUrl = http://localhost:5000
+@webhookAuth = Basic REPLACE_WITH_BASE64_OF__cms-webhook-user_COLON_YOUR_PASSWORD
+@readonlyAuth = Basic REPLACE_WITH_BASE64_OF__readonly-user_COLON_YOUR_PASSWORD
+@adminAuth = Basic REPLACE_WITH_BASE64_OF__admin-user_COLON_YOUR_PASSWORD
+
+# =============================================================
+# Scenario 1: Publish a new entity
+# Expected: 200, processed=1, DB has 1 row for article-1
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+X-Correlation-ID: 11111111-1111-1111-1111-111111111111
+
+[
+  {
+    "type": "publish",
+    "id": "article-1",
+    "version": 1,
+    "timestamp": "2026-08-01T10:00:00Z",
+    "payload": { "title": "Hello world", "body": "First version" }
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 2: Repeat the same publish (idempotency — same version)
+# Expected: 200, processed=0, skipped=1 (log reason "duplicate")
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "publish",
+    "id": "article-1",
+    "version": 1,
+    "timestamp": "2026-08-01T10:00:00Z",
+    "payload": { "title": "Hello world", "body": "First version" }
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 3: Publish a higher version (update)
+# Expected: 200, processed=1, DB row updated to version=2 with new payload
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "publish",
+    "id": "article-1",
+    "version": 2,
+    "timestamp": "2026-08-01T11:00:00Z",
+    "payload": { "title": "Hello world", "body": "Second version — edited" }
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 4: Publish a lower version (superseded — skipped)
+# Expected: 200, processed=0, skipped=1 (log reason "superseded_by_version")
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "publish",
+    "id": "article-1",
+    "version": 1,
+    "timestamp": "2026-08-01T09:00:00Z",
+    "payload": { "title": "Old version", "body": "Should not overwrite" }
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 5: Unpublish an existing entity
+# Expected: 200, processed=1, DB row Status → Unpublished
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "unPublish",
+    "id": "article-1",
+    "version": 3,
+    "timestamp": "2026-08-01T12:00:00Z",
+    "payload": { "title": "Hello world", "body": "Second version — edited" }
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 6: Orphan unpublish (spec corner case per ADR-006)
+# Expected: 200, processed=1, DB has new row with Status=Unpublished
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "unPublish",
+    "id": "article-never-seen",
+    "version": 5,
+    "timestamp": "2026-08-01T13:00:00Z",
+    "payload": { "note": "This id was never published — spec corner case." }
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 7: Delete an existing entity (hard-delete)
+# Expected: 200, processed=1, DB row removed
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "delete",
+    "id": "article-1",
+    "timestamp": "2026-08-01T14:00:00Z"
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 8: Orphan delete (per ADR-006 revision)
+# Expected: 200, skipped=1 (NOT failed — orphan delete is a no-op with Warning log)
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "delete",
+    "id": "does-not-exist",
+    "timestamp": "2026-08-01T15:00:00Z"
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 9: Mixed batch — 1 valid + 1 validation error + 1 orphan delete
+# Expected: 200, processed=1, skipped=1 (orphan delete), failed=1 (validation)
+# errors[] contains the validation_error entry only
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "publish",
+    "id": "article-mixed-a",
+    "version": 1,
+    "timestamp": "2026-08-01T16:00:00Z",
+    "payload": { "title": "Valid" }
+  },
+  {
+    "type": "publish",
+    "id": "article-mixed-b",
+    "timestamp": "2026-08-01T16:00:00Z",
+    "payload": { "title": "Missing version — will fail validation" }
+  },
+  {
+    "type": "delete",
+    "id": "article-that-does-not-exist",
+    "timestamp": "2026-08-01T16:00:00Z"
+  }
+]
+
+###
+
+# =============================================================
+# Scenario 10: Reject unauthenticated calls
+# Expected: 401 Unauthorized
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+
+[]
+
+###
+
+# =============================================================
+# Scenario 11: Reject wrong-role calls (readonly user calling webhook)
+# Expected: 403 Forbidden
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{readonlyAuth}}
+
+[]
+
+###
+
+# =============================================================
+# Scenario 12: List entities as normal user
+# After Scenarios 1-9, expected only Published+Enabled entities
+# =============================================================
+GET {{baseUrl}}/entities
+Authorization: {{readonlyAuth}}
+
+###
+
+# =============================================================
+# Scenario 13: List entities as admin
+# Same DB state — admin sees everything including Unpublished + Disabled
+# Response includes Status and IsDisabled fields
+# =============================================================
+GET {{baseUrl}}/entities
+Authorization: {{adminAuth}}
+
+###
+
+# =============================================================
+# Scenario 14: Fetch single entity by id (admin)
+# =============================================================
+GET {{baseUrl}}/entities/article-mixed-a
+Authorization: {{adminAuth}}
+
+###
+
+# =============================================================
+# Scenario 15: Fetch missing entity → 404
+# =============================================================
+GET {{baseUrl}}/entities/does-not-exist
+Authorization: {{adminAuth}}
+
+###
+
+# =============================================================
+# Scenario 16: Admin disables an entity (sticky flag per ADR-007)
+# Expected: 200, DB row IsDisabled=1
+# =============================================================
+POST {{baseUrl}}/entities/article-mixed-a/disable
+Authorization: {{adminAuth}}
+
+###
+
+# =============================================================
+# Scenario 17: Normal user cannot see disabled entity
+# Expected: 404 (article-mixed-a filtered out even though it exists)
+# =============================================================
+GET {{baseUrl}}/entities/article-mixed-a
+Authorization: {{readonlyAuth}}
+
+###
+
+# =============================================================
+# Scenario 18: Admin still sees disabled entity
+# =============================================================
+GET {{baseUrl}}/entities/article-mixed-a
+Authorization: {{adminAuth}}
+
+###
+
+# =============================================================
+# Scenario 19: Verify admin disable is sticky across CMS re-publish (ADR-007)
+# Publish a higher version, then observe IsDisabled is still true
+# =============================================================
+POST {{baseUrl}}/cms/events
+Content-Type: application/json
+Authorization: {{webhookAuth}}
+
+[
+  {
+    "type": "publish",
+    "id": "article-mixed-a",
+    "version": 2,
+    "timestamp": "2026-08-01T17:00:00Z",
+    "payload": { "title": "Republished — but admin disable is sticky" }
+  }
+]
+
+###
+GET {{baseUrl}}/entities/article-mixed-a
+Authorization: {{adminAuth}}
+
+###
+
+# =============================================================
+# Scenario 20: Admin enables the entity
+# Expected: 200, IsDisabled=false; normal user sees it again
+# =============================================================
+POST {{baseUrl}}/entities/article-mixed-a/enable
+Authorization: {{adminAuth}}
+
+###
+GET {{baseUrl}}/entities/article-mixed-a
+Authorization: {{readonlyAuth}}
+
+###
+
+# =============================================================
+# Scenario 21: Non-admin cannot disable (RBAC per ADR-011)
+# Expected: 403 Forbidden
+# =============================================================
+POST {{baseUrl}}/entities/article-mixed-a/disable
+Authorization: {{readonlyAuth}}
+
+###

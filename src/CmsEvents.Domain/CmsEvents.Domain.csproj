@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>CmsEvents.Domain</RootNamespace>
+    <AssemblyName>CmsEvents.Domain</AssemblyName>
+  </PropertyGroup>
+
+</Project>

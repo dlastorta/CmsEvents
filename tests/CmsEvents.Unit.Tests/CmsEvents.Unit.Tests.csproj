@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>CmsEvents.Unit.Tests</RootNamespace>
+    <AssemblyName>CmsEvents.Unit.Tests</AssemblyName>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CmsEvents.Application\CmsEvents.Application.csproj" />
+    <ProjectReference Include="..\..\src\CmsEvents.Domain\CmsEvents.Domain.csproj" />
+    <ProjectReference Include="..\..\src\CmsEvents.Infrastructure\CmsEvents.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="Moq" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
+    <PackageReference Include="coverlet.collector" />
+  </ItemGroup>
+
+</Project>

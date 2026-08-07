@@ -1,0 +1,8 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <RootNamespace>CmsEvents.Contracts</RootNamespace>
+    <AssemblyName>CmsEvents.Contracts</AssemblyName>
+  </PropertyGroup>
+
+</Project>

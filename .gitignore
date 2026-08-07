@@ -1,0 +1,93 @@
+# ============================================================
+# .NET
+# ============================================================
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Ll]og/
+[Ll]ogs/
+[Cc]overage/
+[Tt]est[Rr]esults/
+TestResult.xml
+coverage.*.xml
+*.coverage
+*.coveragexml
+
+# Build results
+*.dll
+*.exe
+*.pdb
+*.cache
+*.tmp
+*.user
+*.userosscache
+*.suo
+*.userprefs
+*.dbmdl
+*.dbproj.schemaview
+*.jfm
+*.pfx
+*.publishsettings
+
+# NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+*.nuget.props
+*.nuget.targets
+
+# Rider / ReSharper
+.idea/
+_ReSharper*/
+*.[Rr]e[Ss]harper
+*.DotSettings.user
+
+# Visual Studio / VS Code
+.vs/
+.vscode/
+*.sln.docstates
+launchSettings.json.user
+
+# ============================================================
+# Secrets - CRITICAL
+# ============================================================
+appsettings.Local.json
+appsettings.*.local.json
+*.secrets.*
+*.pfx
+*.snk
+secrets.dev.json
+
+# User Secrets (managed by dotnet user-secrets outside repo, but block explicit files)
+secrets.json
+
+# ============================================================
+# Docker
+# ============================================================
+.dockerignore.local
+docker-compose.override.local.yml
+
+# ============================================================
+# OS
+# ============================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ============================================================
+# Misc
+# ============================================================
+*.log
+*.tmp
+node_modules/
+.env
+.env.local

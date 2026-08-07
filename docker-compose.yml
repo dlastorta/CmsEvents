@@ -1,0 +1,35 @@
+# docker-compose for local development
+# Starts SQL Server 2022 for the CmsEvents service.
+#
+# Usage:
+#   docker compose up -d          Start SQL Server in the background
+#   docker compose down           Stop and remove containers
+#   docker compose down -v        Stop and remove containers + volumes (fresh DB)
+#
+# Connection string for local dev (put in User Secrets):
+#   Server=localhost,1433;Database=CmsEventsDb;User Id=sa;Password=Local_Dev_Password_123!;TrustServerCertificate=True;Encrypt=False
+
+services:
+
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: cmsevents-sqlserver
+    hostname: cmsevents-sqlserver
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_SA_PASSWORD: "Local_Dev_Password_123!"
+      MSSQL_PID: "Developer"
+    ports:
+      - "1433:1433"
+    volumes:
+      - cmsevents-sqldata:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "$$MSSQL_SA_PASSWORD" -C -Q "SELECT 1" || exit 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+volumes:
+  cmsevents-sqldata:
+    name: cmsevents-sqldata

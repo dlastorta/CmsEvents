@@ -1,0 +1,57 @@
+namespace CmsEvents.Api.Endpoints;
+
+using System.Globalization;
+using CmsEvents.Api.Configuration;
+using CmsEvents.Api.Middleware;
+using CmsEvents.Application.Features.ProcessEventBatch;
+using CmsEvents.Contracts.Events;
+using CmsEvents.Contracts.Responses;
+using MediatR;
+
+/// <summary>
+/// Endpoint group for POST /cms/events per spec item 1.
+/// Response schema in responses.md; per-event processing behavior in ADR-008.
+/// </summary>
+public static class CmsEventsEndpoints
+{
+    public static IEndpointRouteBuilder MapCmsEventsEndpoints(this IEndpointRouteBuilder builder)
+    {
+        var group = builder.MapGroup("/cms/events")
+            .RequireAuthorization(AuthorizationPolicies.OrganizationOnly)
+            .WithTags("CMS Events");
+
+        group.MapPost("/", async (
+            IReadOnlyList<CmsEventEnvelope> events,
+            HttpContext context,
+            IMediator mediator,
+            CancellationToken cancellationToken) =>
+        {
+            var correlationId = ResolveCorrelationId(context);
+            var batchId = Guid.NewGuid();
+            context.Response.Headers["X-Batch-Id"] = batchId.ToString("D", CultureInfo.InvariantCulture);
+
+            var result = await mediator.Send(
+                new ProcessEventBatchCommand(events, correlationId, batchId),
+                cancellationToken);
+
+            return Results.Ok(result);
+        })
+        .WithName("ProcessEventBatch")
+        .Produces<BatchResponse>(StatusCodes.Status200OK)
+        .Produces<ErrorEnvelope>(StatusCodes.Status400BadRequest)
+        .Produces<ErrorEnvelope>(StatusCodes.Status401Unauthorized)
+        .Produces<ErrorEnvelope>(StatusCodes.Status403Forbidden)
+        .Produces<ErrorEnvelope>(StatusCodes.Status429TooManyRequests)
+        .Produces<ErrorEnvelope>(StatusCodes.Status500InternalServerError)
+        // WithRequestTimeout must come after Produces<T> calls — it returns IEndpointConventionBuilder
+        // (base type) and Produces<T> requires RouteHandlerBuilder. Chain order matters.
+        .WithRequestTimeout(RequestTimeoutPolicies.EventBatch);
+
+        return builder;
+    }
+
+    private static Guid ResolveCorrelationId(HttpContext context) =>
+        context.Items[CorrelationIdMiddleware.HttpContextItemKey] is Guid id
+            ? id
+            : Guid.NewGuid();
+}

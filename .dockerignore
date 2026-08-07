@@ -1,0 +1,31 @@
+# Build artifacts
+**/bin/
+**/obj/
+**/out/
+**/*.user
+**/*.suo
+
+# IDE
+.vs/
+.vscode/
+.idea/
+
+# Tests
+tests/
+**/TestResults/
+
+# Docs and CI
+docs/
+.github/
+*.md
+
+# Local dev files
+docker-compose*.yml
+!docker-compose.yml
+.gitignore
+.editorconfig
+
+# Secrets
+appsettings.Local.json
+*.secrets.*
+secrets.json
