@@ -66,6 +66,18 @@ Roughly 20 uncovered branches from:
 
 **Why not test**: same "defensive against runtime environment problems" pattern. The logging is verified by manual inspection during setup; failing to log is not a functional bug.
 
+### Consciously deferred: mid-batch transient failure integration test
+
+An end-to-end test that exercises the Polly retry + `TransientPersistenceException` path against real SQL was considered and deferred. Reliably injecting a transient failure at the SQL layer (deadlock, connection reset, resource-limit) requires either a test-only `DbCommandInterceptor`, a mid-transaction connection kill, or a chaos-engineering harness — all of which add non-trivial test infrastructure whose maintenance cost exceeds the incremental confidence gain.
+
+The transient-retry behavior is instead covered by:
+
+- Unit test `ProcessEventBatchHandlerTests.Handle_TransientFailure_RetriesThenMapsToProcessingTimeout` — asserts on Polly attempt count (initial + 3 retries) and the resulting `processing_timeout` outcome.
+- Unit test `ProcessEventBatchHandlerTests.Handle_PermanentPersistenceFailure_DoesNotRetry_MapsToPersistenceErrorReason` — asserts that non-transient failures bypass Polly (called exactly once).
+- Unit matrix in `SqlExceptionClassifierTests` — verifies the SQL error-number taxonomy (transient vs permanent) used by the repository at the classification seam.
+
+If a future incident implicates the retry path, promote this to an integration test using one of the injection techniques above.
+
 ## Options if higher branch coverage is required
 
 If a stakeholder requires ≥ 80% branch coverage, options in order of effort:

@@ -134,12 +134,145 @@ public sealed class CmsEventsEndpointTests
         body.Errors.Should().BeEmpty();
     }
 
-    private static CmsEventEnvelope NewPublish(string id, int version) => new()
+    [Fact]
+    public async Task Post_DeleteThenPublish_ForSameId_TreatsSecondPublishAsNewEntity()
+    {
+        // Spec-adjacent corner case documented in ADR-005: hard-delete semantics forbid retaining
+        // a tombstone, so a publish arriving after a completed delete for the same id is
+        // indistinguishable from a legitimate new entity. Assert the whole sequence in one batch.
+        using var client = _factory.CreateClientAsCmsWebhook();
+        var id = "delete-then-publish-" + Guid.NewGuid().ToString("N")[..8];
+
+        var events = new[]
+        {
+            NewPublish(id, version: 1, timestampIso: "2026-08-01T10:00:00Z"),
+            new CmsEventEnvelope
+            {
+                Type = CmsEventType.Delete,
+                Id = id,
+                Timestamp = "2026-08-01T10:00:01Z", // strictly newer than the publish, so delete applies
+            },
+            NewPublish(id, version: 1, timestampIso: "2026-08-01T10:00:02Z"),
+        };
+
+        var response = await client.PostAsJsonAsync("/cms/events", events);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadFromJsonAsync<BatchResponse>();
+        body!.TotalEvents.Should().Be(3);
+        body.Processed.Should().Be(3, "publish + delete + re-publish are all applied (no tombstone per hard-delete semantics)");
+        body.Skipped.Should().Be(0);
+        body.Failed.Should().Be(0);
+
+        // Verify final state: the entity exists again with version 1 (the re-publish), not deleted.
+        using var adminClient = _factory.CreateClientAsAdmin();
+        var getResponse = await adminClient.GetAsync($"/entities/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK,
+            "the second publish creates the entity anew after the delete removed the original");
+    }
+
+    [Fact]
+    public async Task Post_LateDeleteAfterNewerPublish_IsSkippedAsStaleDelete_EntityRemains()
+    {
+        // Validates the stale-delete guard (Domain.Entity.EvaluateForDelete) end-to-end against
+        // real SQL. Batch 1 publishes at T. Batch 2 tries to delete with an EARLIER timestamp
+        // (simulates network reordering / at-least-once replay). Delete must be skipped and the
+        // entity must survive.
+        using var client = _factory.CreateClientAsCmsWebhook();
+        var id = "late-delete-" + Guid.NewGuid().ToString("N")[..8];
+
+        // Batch 1: publish at T = 10:00:05.
+        var publishBatch = new[] { NewPublish(id, version: 1, timestampIso: "2026-08-01T10:00:05Z") };
+        var publishResp = await client.PostAsJsonAsync("/cms/events", publishBatch);
+        publishResp.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Batch 2: delete with timestamp T = 10:00:00 (earlier than the publish above).
+        var lateDeleteBatch = new[]
+        {
+            new CmsEventEnvelope
+            {
+                Type = CmsEventType.Delete,
+                Id = id,
+                Timestamp = "2026-08-01T10:00:00Z",
+            },
+        };
+        var deleteResp = await client.PostAsJsonAsync("/cms/events", lateDeleteBatch);
+        deleteResp.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var deleteBody = await deleteResp.Content.ReadFromJsonAsync<BatchResponse>();
+        deleteBody!.Skipped.Should().Be(1, "delete timestamp <= stored timestamp → stale_delete guard skips it");
+        deleteBody.Failed.Should().Be(0);
+        deleteBody.Errors.Should().BeEmpty();
+
+        // Verify entity survived the stale delete.
+        using var adminClient = _factory.CreateClientAsAdmin();
+        var getResponse = await adminClient.GetAsync($"/entities/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK, "stale delete must not remove — entity has a newer publish");
+    }
+
+    [Fact]
+    public async Task Post_OutOfOrderVersionsInSameBatch_HigherVersionWins_LowerIsSkippedAsSuperseded()
+    {
+        // v3 arrives BEFORE v2 in the same batch. Per ADR-005 idempotency, v3 applies and v2 is
+        // then skipped as superseded_by_version — final state has version 3 regardless of arrival
+        // order.
+        using var client = _factory.CreateClientAsCmsWebhook();
+        var id = "out-of-order-" + Guid.NewGuid().ToString("N")[..8];
+
+        var events = new[]
+        {
+            NewPublish(id, version: 3, timestampIso: "2026-08-01T10:00:03Z"),
+            NewPublish(id, version: 2, timestampIso: "2026-08-01T10:00:02Z"),
+        };
+
+        var response = await client.PostAsJsonAsync("/cms/events", events);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadFromJsonAsync<BatchResponse>();
+        body!.Processed.Should().Be(1, "only the higher-version publish is applied");
+        body.Skipped.Should().Be(1, "the older v2 is skipped as superseded_by_version");
+        body.Failed.Should().Be(0);
+
+        // Verify final version via admin GET (payload / version exposed).
+        using var adminClient = _factory.CreateClientAsAdmin();
+        var getResponse = await adminClient.GetAsync($"/entities/{id}");
+        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        var entity = await getResponse.Content.ReadFromJsonAsync<EntityResponse>();
+        entity!.Version.Should().Be(3, "the higher version must win regardless of batch arrival order");
+    }
+
+    [Fact]
+    public async Task Post_DuplicateEventsInSameBatch_ProcessedOnce_SkippedOnce()
+    {
+        // Same id/version/timestamp appearing twice in one batch. First event applies; second is
+        // skipped as duplicate per ADR-005 equal-version-equal-timestamp rule.
+        using var client = _factory.CreateClientAsCmsWebhook();
+        var id = "duplicate-in-batch-" + Guid.NewGuid().ToString("N")[..8];
+
+        var events = new[]
+        {
+            NewPublish(id, version: 1, timestampIso: "2026-08-01T10:00:00Z"),
+            NewPublish(id, version: 1, timestampIso: "2026-08-01T10:00:00Z"),
+        };
+
+        var response = await client.PostAsJsonAsync("/cms/events", events);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var body = await response.Content.ReadFromJsonAsync<BatchResponse>();
+        body!.Processed.Should().Be(1);
+        body.Skipped.Should().Be(1, "second occurrence hits the duplicate skip rule");
+        body.Failed.Should().Be(0);
+    }
+
+    private static CmsEventEnvelope NewPublish(string id, int version) =>
+        NewPublish(id, version, timestampIso: NowIso);
+
+    private static CmsEventEnvelope NewPublish(string id, int version, string timestampIso) => new()
     {
         Type = CmsEventType.Publish,
         Id = id,
         Version = version,
-        Timestamp = NowIso,
+        Timestamp = timestampIso,
         Payload = JsonDocument.Parse("{\"title\":\"integration-test\"}").RootElement,
     };
 }

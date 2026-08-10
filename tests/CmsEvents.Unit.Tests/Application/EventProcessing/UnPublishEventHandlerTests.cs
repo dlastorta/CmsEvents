@@ -67,7 +67,7 @@ public sealed class UnPublishEventHandlerTests
     [Fact]
     public async Task UnPublish_ForExistingHigherVersion_AppliesAndFlipsStatus()
     {
-        var existing = Entity.CreateFromPublish("id-1", version: 2, timestamp: Now, payload: "{}", now: Now);
+        var existing = Entity.CreateFromPublish("id-1", version: 2, timestamp: Now, payload: "{\"old\":true}", now: Now);
         existing.Status.Should().Be(EntityStatus.Published);
 
         var repository = new Mock<IEntityRepository>();
@@ -75,13 +75,21 @@ public sealed class UnPublishEventHandlerTests
             .Setup(r => r.FindByIdAsync("id-1", It.IsAny<CancellationToken>()))
             .ReturnsAsync(existing);
 
-        var sut = new UnPublishEventHandler(repository.Object, new FakeClock(Now.AddMinutes(1)), NullLogger<UnPublishEventHandler>.Instance);
+        var laterClock = Now.AddMinutes(1);
+        var sut = new UnPublishEventHandler(repository.Object, new FakeClock(laterClock), NullLogger<UnPublishEventHandler>.Instance);
 
         var outcome = await sut.HandleAsync(NewEvent("id-1", version: 3), CancellationToken.None);
 
         outcome.Type.Should().Be(EventOutcomeType.Processed);
+
+        // Full state assertion — status flip + all ADR-005 fields verified on the mutated aggregate.
         existing.Status.Should().Be(EntityStatus.Unpublished);
         existing.LastProcessedVersion.Should().Be(3);
+        existing.LastProcessedTimestamp.Should().Be(Now, "event timestamp is used, not clock time");
+        existing.UpdatedAt.Should().Be(laterClock, "clock drives UpdatedAt");
+        existing.Payload.Should().Contain("\"corner-case\"", "payload must be replaced with the new event's body");
+        existing.Payload.Should().NotContain("\"old\"", "the previous payload should not linger after unpublish apply");
+
         repository.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 
