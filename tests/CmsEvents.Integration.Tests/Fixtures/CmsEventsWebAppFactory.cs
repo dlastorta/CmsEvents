@@ -52,6 +52,26 @@ public sealed class CmsEventsWebAppFactory : WebApplicationFactory<Program>, IAs
 
     public HttpClient CreateClientAsAdmin() => CreateClientAs(AdminUsername);
 
+    /// <summary>
+    /// Creates a client whose <c>Authorization</c> header carries arbitrary credentials — used by
+    /// negative-auth tests (wrong password, unknown user) per spec item 7.
+    /// </summary>
+    public HttpClient CreateClientWithBasicAuth(string username, string password) =>
+        AddBasicAuth(CreateClient(), username, password);
+
+    /// <summary>
+    /// Creates a client whose <c>Authorization</c> header is present but malformed (not valid
+    /// Base64 or missing the <c>username:password</c> separator). Exercises the "Malformed" branch
+    /// of <c>BasicAuthenticationHandler</c>.
+    /// </summary>
+    public HttpClient CreateClientWithMalformedAuthHeader(string rawHeaderValue)
+    {
+        var client = CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("Basic", rawHeaderValue);
+        return client;
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         var hash = BCrypt.Net.BCrypt.HashPassword(TestPassword, TestBcryptWorkFactor);

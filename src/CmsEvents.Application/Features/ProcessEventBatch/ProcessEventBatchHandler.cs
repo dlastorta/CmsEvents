@@ -168,6 +168,18 @@ public sealed class ProcessEventBatchHandler : IRequestHandler<ProcessEventBatch
                 reason: "processing_timeout",
                 detail: "Processing failed, please retry this event");
         }
+        catch (PermanentPersistenceException ex)
+        {
+            // NON-transient DB failure — constraint violation, concurrency conflict, or similar.
+            // Retrying would just delay the same error, so Polly does NOT handle this exception
+            // type. Log the SQL error number for ops (never surfaced to producer per ADR-011).
+            _logger.LogError(ex,
+                "Event {Index} rejected by persistence layer (sqlErrorNumber={SqlErrorNumber}): id={Id}",
+                index, ex.SqlErrorNumber, evt.Id);
+            return EventOutcome.Failed(
+                reason: "persistence_error",
+                detail: "Event was rejected by the data store. Verify event content and contact support if the problem persists.");
+        }
 
         // Any other exception (system-wide failure, config error, bug) is intentionally NOT caught.
         // It propagates to Api's GlobalExceptionHandler which returns HTTP 500 with batchId +

@@ -56,6 +56,42 @@ public sealed class EntityIdempotencyTests
     }
 
     [Fact]
+    public void EvaluateForDelete_NewerTimestamp_ReturnsApply()
+    {
+        var entity = Entity.CreateFromPublish("id-1", version: 3, timestamp: Now, payload: "{}", now: Now);
+
+        var decision = entity.EvaluateForDelete(incomingTimestamp: Now.AddSeconds(1));
+
+        decision.Outcome.Should().Be(IdempotencyOutcome.Apply);
+    }
+
+    [Fact]
+    public void EvaluateForDelete_OlderTimestamp_ReturnsSkipStaleDelete()
+    {
+        // Scenario: delete for id-1 was network-reordered and arrives after a newer publish.
+        // Applying it would erase the newer state.
+        var entity = Entity.CreateFromPublish("id-1", version: 5, timestamp: Now, payload: "{}", now: Now);
+
+        var decision = entity.EvaluateForDelete(incomingTimestamp: Now.AddSeconds(-10));
+
+        decision.Outcome.Should().Be(IdempotencyOutcome.Skip);
+        decision.SkipReason.Should().Be("stale_delete");
+    }
+
+    [Fact]
+    public void EvaluateForDelete_EqualTimestamp_ReturnsSkipStaleDelete()
+    {
+        // Equal-timestamp is fail-safe skipped — a delete "at the same instant" as the last
+        // observed state has no defensible interpretation, so we protect against replays.
+        var entity = Entity.CreateFromPublish("id-1", version: 3, timestamp: Now, payload: "{}", now: Now);
+
+        var decision = entity.EvaluateForDelete(incomingTimestamp: Now);
+
+        decision.Outcome.Should().Be(IdempotencyOutcome.Skip);
+        decision.SkipReason.Should().Be("stale_delete");
+    }
+
+    [Fact]
     public void CreateOrphanFromUnpublish_YieldsUnpublishedStatus()
     {
         var entity = Entity.CreateOrphanFromUnpublish("id-1", version: 2, timestamp: Now, payload: "{}", now: Now);

@@ -292,7 +292,15 @@ Each incoming `publish` or `unPublish` event carries a `version` (monotonic inte
    - `incoming.timestamp > stored.LastProcessedTimestamp` → apply; update timestamp only.
    - Otherwise → skip (duplicate or superseded).
 
-**Delete events**: hard-delete per spec item 2. No version comparison (delete events carry no version). If the entity does not exist locally, the operation is a no-op — counted as skipped and logged at Warning level for anomaly detection (see ADR-006 for handling policy, ADR-014 for logging level). If a `publish` event arrives after a `delete` due to out-of-order delivery, it is processed as a new entity — hard-delete semantics forbid retaining a tombstone. This is a documented limitation of the spec-required delete behavior.
+**Delete events**: hard-delete per spec item 2. Delete carries no `version`, so ordering is derived from `timestamp` alone — the rule is:
+
+- `incoming.timestamp > stored.LastProcessedTimestamp` → apply (hard-delete).
+- `incoming.timestamp <= stored.LastProcessedTimestamp` → skip as `stale_delete` (Warning log). A later `publish` or `unPublish` has already advanced the entity; applying the delete would erase valid state. Guards against network reordering, replayed batches, and at-least-once producers.
+- Entity not found locally → skip as `orphan_delete` (Warning log). See ADR-006 for handling policy, ADR-014 for logging levels.
+
+Equal-timestamp is fail-safe skipped: a delete "at the same instant" as the last observed state has no defensible interpretation, so we protect against replays.
+
+If a `publish` event arrives after a `delete` for the same id due to out-of-order delivery, it is processed as a new entity — hard-delete semantics forbid retaining a tombstone. This is a documented limitation of the spec-required delete behavior; the timestamp guard above only protects entities that still exist locally at the moment the delete is evaluated.
 
 **Validation errors** (event rejected as permanent failure per ADR-008; batch processing continues with remaining events):
 
@@ -513,8 +521,9 @@ Each event processed inside its own DB transaction. **Events are processed seque
 
 Failure classification:
 
-- **Transient** (DB deadlock, connection reset): Polly retry 3 attempts, exponential backoff (100/200/400ms). If exhausted, marked `processing_timeout` in the response (internal cause logged separately at Error level per ADR-014; not exposed to producer).
-- **Permanent** (validation error, orphan delete, unknown type): marked with specific reason; processing continues.
+- **Transient** (DB deadlock, connection reset, network glitch): identified by SQL Server error number via `SqlExceptionClassifier`. Polly retry 3 attempts, exponential backoff (100/200/400ms). If exhausted, marked `processing_timeout` in the response (internal cause logged separately at Error level per ADR-014; not exposed to producer).
+- **Permanent DB failure** (PK/FK/CHECK violation, optimistic-concurrency conflict, unclassified SQL error): NOT retried — retrying just delays the same error. Wrapped as `PermanentPersistenceException`, marked `persistence_error` in the response (SQL error number logged at Error level; not exposed).
+- **Permanent domain failure** (validation error, unknown type): marked with the specific reason (`validation_error`, `unknown_event_type`); processing continues on the next event.
 
 #### Input validation (per spec item 2)
 
@@ -538,7 +547,7 @@ Rule of thumb: **if a failure should halt the whole request, put the validator i
 - Status codes: `200` (batch processed), `400` (malformed envelope), `401` (auth per ADR-011), `500` (catastrophic per ADR-009).
 - Body includes: `batchId`, `correlationId`, counts (`totalEvents`, `processed`, `skipped`, `failed`) as flat top-level fields, and `errors[]` array with per-event details for **failed events only**.
 - **Skipped events are counted but not itemized in the response** — they are outcomes under idempotency (retry-safe behavior) or orphan-delete no-ops (per ADR-006). Skipped events appear in structured logs per ADR-014.
-- Failure `reason` enum (present in response `errors[]`): `validation_error`, `processing_timeout`, `unknown_event_type`. Producer-facing details use non-technical wording (no internal implementation leaks).
+- Failure `reason` enum (present in response `errors[]`): `validation_error`, `processing_timeout`, `persistence_error`, `unknown_event_type`. Producer-facing details use non-technical wording (no internal implementation leaks).
 - Skip `reason` enum (logs only, not response): `superseded_by_version`, `duplicate`, `orphan_delete`.
 - Full schema and per-scenario examples in `responses.md`.
 

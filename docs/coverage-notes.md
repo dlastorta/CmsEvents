@@ -46,12 +46,14 @@ Roughly 15 uncovered branches. Examples:
 
 ### Category 3: Parser edge cases in `BasicHeaderParseResult`
 
-Roughly 10 uncovered branches. `BasicAuthenticationHandler.TryParseBasicHeader` has multiple guards that only branch on malformed input the framework rejects earlier:
+`BasicAuthenticationHandler.TryParseBasicHeader` has multiple guards that only branch on malformed input the framework rejects earlier:
 
 - `if (string.IsNullOrEmpty(authHeader) || !authHeader.StartsWith(SchemePrefix, ...))` — the null/empty path is unreachable when the header is present (framework guarantees non-null).
-- `catch (FormatException)` on `Convert.FromBase64String` — reached only when the client sends invalid base64 in the Authorization header.
+- `catch (FormatException)` on `Convert.FromBase64String` — reached when the client sends invalid Base64 in the Authorization header. **This branch is now covered** by `CmsEventsEndpointTests.Post_WithMalformedAuthorizationHeader_ReturnsUnauthorized`.
 
-**Why not test**: exercised indirectly by the `.http` scenarios (invalid auth). The `FormatException` case would require a very unusual malformed client. Reachable in production only through malicious/broken clients — and the response is the same as the "user not found" case (`Fail("Invalid credentials")`) which is well-tested.
+The remaining uncovered guards are defensive against inputs the framework layer never produces (e.g., a non-null header value that is nonetheless empty). They are documented in code with rationale.
+
+The "wrong password" and "unknown user" branches — spec item 7 requires them tested — are covered by `CmsEventsEndpointTests.Post_WithWrongPassword_ReturnsUnauthorized` and `Post_WithUnknownUsername_ReturnsUnauthorized`.
 
 ### Category 4: EF Core / infrastructure boilerplate
 

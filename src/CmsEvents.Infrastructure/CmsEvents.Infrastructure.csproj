@@ -27,4 +27,8 @@
     <PackageReference Include="Polly.Extensions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="CmsEvents.Unit.Tests" />
+  </ItemGroup>
+
 </Project>

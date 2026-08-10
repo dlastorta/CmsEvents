@@ -160,6 +160,40 @@ public sealed class ProcessEventBatchHandlerTests
     }
 
     [Fact]
+    public async Task Handle_PermanentPersistenceFailure_DoesNotRetry_MapsToPersistenceErrorReason()
+    {
+        // PK/FK/CHECK violations are NOT transient — Polly should not retry, and the outcome
+        // should carry the distinct 'persistence_error' reason (not 'processing_timeout').
+        var repository = new Mock<IEntityRepository>();
+        SetupPassthroughTransaction(repository);
+
+        var handlerMock = new Mock<IEventHandler>();
+        handlerMock.SetupGet(h => h.EventType).Returns(CmsEventType.Publish);
+        handlerMock
+            .Setup(h => h.HandleAsync(It.IsAny<CmsEventEnvelope>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new PermanentPersistenceException(
+                "simulated PK violation",
+                sqlErrorNumber: 2627,
+                new InvalidOperationException("underlying")));
+
+        var dispatcher = new EventDispatcher(new[] { handlerMock.Object });
+        var sut = NewHandler(repository, dispatcher);
+
+        var command = NewCommand(NewValidPublish("a", version: 1));
+
+        var response = await sut.Handle(command, CancellationToken.None);
+
+        response.Failed.Should().Be(1);
+        response.Errors.Should().ContainSingle(e => e.Reason == "persistence_error");
+
+        // Called exactly ONCE — no Polly retry for permanent failures.
+        handlerMock.Verify(
+            h => h.HandleAsync(It.IsAny<CmsEventEnvelope>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "permanent persistence failures must not be retried — retrying just delays the same error");
+    }
+
+    [Fact]
     public async Task Handle_FarFutureTimestamp_ProcessesEventNormally_ClockSkewIsPureObservability()
     {
         var repository = new Mock<IEntityRepository>();

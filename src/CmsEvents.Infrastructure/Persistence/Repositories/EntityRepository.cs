@@ -34,11 +34,21 @@ public sealed class EntityRepository : IEntityRepository
         }
         catch (DbUpdateException ex)
         {
-            // Wrap as domain-facing transient exception per ADR-010 (Application must not depend
-            // on EF Core). Handlers catch TransientPersistenceException to trigger Polly retry
-            // per ADR-008. Non-DbUpdateException failures propagate as-is to the global handler → 500.
-            throw new TransientPersistenceException(
-                "Persistence layer transient failure — retry recommended.", ex);
+            // Classify per SqlExceptionClassifier so PK/FK/CHECK violations (permanent) are NOT
+            // Polly-retried and are surfaced with a distinct reason. Wrapping keeps Application
+            // ORM-agnostic per ADR-010 rule 7 — handlers never catch DbUpdateException directly.
+            // Non-DbUpdateException failures propagate as-is to the global handler → HTTP 500.
+            if (SqlExceptionClassifier.IsTransient(ex))
+            {
+                throw new TransientPersistenceException(
+                    "Persistence layer transient failure — retry recommended.", ex);
+            }
+
+            var sqlErrorNumber = SqlExceptionClassifier.ExtractSqlErrorNumber(ex);
+            throw new PermanentPersistenceException(
+                "Persistence layer rejected the change (constraint violation, concurrency conflict, or non-retryable error).",
+                sqlErrorNumber,
+                ex);
         }
     }
 

@@ -36,6 +36,45 @@ public sealed class CmsEventsEndpointTests
     }
 
     [Fact]
+    public async Task Post_WithWrongPassword_ReturnsUnauthorized()
+    {
+        // Spec item 7: Basic Authentication with valid/invalid credentials. Known-good user,
+        // wrong password — must fail closed (BCrypt.Verify branch in BasicAuthenticationHandler).
+        using var client = _factory.CreateClientWithBasicAuth(
+            CmsEventsWebAppFactory.CmsWebhookUsername,
+            password: "definitely-not-the-right-password");
+
+        var response = await client.PostAsJsonAsync("/cms/events", Array.Empty<CmsEventEnvelope>());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Post_WithUnknownUsername_ReturnsUnauthorized()
+    {
+        // Spec item 7: unknown user must produce the SAME response as wrong password (no user-
+        // existence leak per ADR-011). Covers the "user is null" branch alongside wrong-password.
+        using var client = _factory.CreateClientWithBasicAuth(
+            username: "user-that-does-not-exist",
+            password: CmsEventsWebAppFactory.TestPassword);
+
+        var response = await client.PostAsJsonAsync("/cms/events", Array.Empty<CmsEventEnvelope>());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task Post_WithMalformedAuthorizationHeader_ReturnsUnauthorized()
+    {
+        // "Basic" scheme but the token is not valid Base64 → Malformed branch of the handler.
+        using var client = _factory.CreateClientWithMalformedAuthHeader("!!!not-base64!!!");
+
+        var response = await client.PostAsJsonAsync("/cms/events", Array.Empty<CmsEventEnvelope>());
+
+        response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
     public async Task Post_WithReadonlyUserRole_ReturnsForbidden()
     {
         using var client = _factory.CreateClientAsReadonlyUser();

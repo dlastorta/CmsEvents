@@ -126,6 +126,7 @@ Returned regardless of individual event outcomes. The batch was received and eve
 |--------|---------|
 | `validation_error` | Event failed input validation (missing/invalid field per ADR-008) |
 | `processing_timeout` | Event could not be processed after retries. Producer should retry the event. Internal cause (e.g., DB deadlock) is logged at Error level per ADR-014 but never exposed in the response |
+| `persistence_error` | Event was rejected by the data store for a NON-transient reason (constraint violation, concurrency conflict, or an unclassified SQL error). Retrying is NOT recommended without changing the event content. Internal SQL error number is logged at Error level per ADR-014 but never exposed in the response |
 | `unknown_event_type` | `type` value not in the enum (validation should catch, but defensive) |
 
 Producer-facing `detail` messages are non-technical and actionable. Internal implementation details (DB errors, stack traces, etc.) never appear in responses — they are logged for the dev team.
@@ -135,6 +136,7 @@ Producer-facing `detail` messages are non-technical and actionable. Internal imp
 - `superseded_by_version` — `incoming.version < stored.LastProcessedVersion` (per ADR-005)
 - `duplicate` — `incoming.version == stored.LastProcessedVersion` and `incoming.timestamp <= stored.LastProcessedTimestamp` (per ADR-005)
 - `orphan_delete` — `delete` event received for an `id` that does not exist locally (per ADR-006). Logged at Warning level for anomaly detection
+- `stale_delete` — `delete` event received for an `id` that exists locally, but `incoming.timestamp <= stored.LastProcessedTimestamp` — a later publish/unpublish already advanced the entity. Applying would erase valid state. Logged at Warning level for anomaly detection (network reordering, replayed batch, at-least-once producer)
 
 ### 200 OK — all events processed
 

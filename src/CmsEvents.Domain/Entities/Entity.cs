@@ -112,6 +112,25 @@ public sealed class Entity
     }
 
     /// <summary>
+    /// Evaluate an incoming delete event against the current state per ADR-005 ordering rule.
+    /// Delete carries no version, so ordering is derived from timestamp alone: a delete is
+    /// applied only if strictly newer than the last observed state. This prevents a late-
+    /// arriving delete from erasing a publish/unpublish that already advanced the entity
+    /// (network reordering, replayed batch, at-least-once producer).
+    /// </summary>
+    public IdempotencyDecision EvaluateForDelete(DateTime incomingTimestamp)
+    {
+        if (incomingTimestamp > LastProcessedTimestamp)
+        {
+            return IdempotencyDecision.Apply();
+        }
+
+        // Equal timestamp is treated as stale — a delete "at the same instant" as the last
+        // observed state has no defensible interpretation, so we fail-safe against replays.
+        return IdempotencyDecision.SkipStaleDelete();
+    }
+
+    /// <summary>
     /// Apply a publish event that has already passed the idempotency check.
     /// </summary>
     public void ApplyPublish(int version, DateTime timestamp, string payload, DateTime now)

@@ -40,9 +40,10 @@ public sealed class DeleteEventHandlerTests
     }
 
     [Fact]
-    public async Task Delete_ForExisting_RemovesAndSaves()
+    public async Task Delete_ForExisting_WithNewerTimestamp_RemovesAndSaves()
     {
-        var entity = Entity.CreateFromPublish("id-1", version: 1, timestamp: Now, payload: "{}", now: Now);
+        // Delete timestamp (NowIso = Now) is strictly newer than the stored publish (Now - 1s).
+        var entity = Entity.CreateFromPublish("id-1", version: 1, timestamp: Now.AddSeconds(-1), payload: "{}", now: Now.AddSeconds(-1));
         var repository = new Mock<IEntityRepository>();
         repository
             .Setup(r => r.FindByIdAsync("id-1", It.IsAny<CancellationToken>()))
@@ -57,5 +58,29 @@ public sealed class DeleteEventHandlerTests
         outcome.Type.Should().Be(EventOutcomeType.Processed);
         repository.Verify(r => r.Remove(entity), Times.Once);
         repository.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task Delete_ForExisting_WithOlderTimestamp_ReturnsSkipStaleDelete_DoesNotRemove()
+    {
+        // Scenario: delete was network-reordered and arrives AFTER a newer publish already
+        // advanced the entity. Applying would erase valid state.
+        var entity = Entity.CreateFromPublish("id-1", version: 5, timestamp: Now.AddMinutes(5), payload: "{}", now: Now.AddMinutes(5));
+        var repository = new Mock<IEntityRepository>();
+        repository
+            .Setup(r => r.FindByIdAsync("id-1", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(entity);
+
+        var sut = new DeleteEventHandler(repository.Object, NullLogger<DeleteEventHandler>.Instance);
+
+        var outcome = await sut.HandleAsync(
+            new CmsEventEnvelope { Type = CmsEventType.Delete, Id = "id-1", Timestamp = NowIso },
+            CancellationToken.None);
+
+        outcome.Type.Should().Be(EventOutcomeType.Skipped);
+        outcome.Reason.Should().Be("stale_delete");
+        repository.Verify(r => r.Remove(It.IsAny<Entity>()), Times.Never,
+            "stale delete must not remove — the entity has a newer publish/unpublish");
+        repository.Verify(r => r.SaveChangesAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
 }

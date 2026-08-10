@@ -74,7 +74,7 @@ This clock-skew warning is **not implemented** in `PublishEventHandler` or `UnPu
 - Per-event transaction via `IEntityRepository.ExecuteInTransactionAsync` (with `CreateExecutionStrategy` pattern per fix applied after Diego's runtime error).
 - Polly retry: 3 attempts, exponential backoff (100/200/400 ms), excludes `UnknownEventTypeException` per ADR.
 - Validation via `CmsEventValidator` called explicitly per event, does not throw (in-handler placement per ADR-008 principle).
-- Failure reasons in response match ADR enum: `validation_error`, `processing_timeout`, `unknown_event_type`. Internal exception details logged separately at Error level.
+- Failure reasons in response match ADR enum: `validation_error`, `processing_timeout`, `persistence_error`, `unknown_event_type`. Internal exception details logged separately at Error level.
 - Response schema (counts flat + `errors[]` for failed only) matches `responses.md`.
 
 ### ADR-009 — Failure Handling and Extension Paths — DRIFT
