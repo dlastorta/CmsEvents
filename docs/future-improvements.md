@@ -230,3 +230,17 @@ Companion documents:
 **Design sketch**: SignalR hub in `CmsEvents.Api`. Event handlers (per ADR-004) publish domain events after applying state changes. A hub subscriber projects events into consumer-facing messages, filtered by consumer's role. Requires new authorization model for hub connections.
 
 **Related ADRs**: ADR-004, ADR-007.
+
+---
+
+## 15. Reader-side projections
+
+**Context**: `EntityQueries.ListAsync` and `EntityQueries.FindByIdAsync` materialize the full `Entity` row via `NoTrackingWithIdentityResolution`. The reader technique of projecting with `.Select(e => new EntityReadModel {...})` is documented as an available optimization in ADR-010 but is not currently applied.
+
+**Why not now**: The response DTO (`EntityResponse`) consumes 6 of the 8 entity columns; the only columns projection would skip today are `CreatedAt` and `UpdatedAt` (~16 bytes per row). The largest column by far — `Payload` (opaque JSON, potentially KBs) — is required by the response and would remain on the query regardless. The ceremony of maintaining a separate read model exceeds the bandwidth savings at current scale.
+
+**Trigger**: One or more of the following becomes true — (a) the entity schema gains columns that are NOT surfaced in the response (e.g., admin-only audit fields, denormalized aggregates, soft-delete markers); (b) a list endpoint variant is introduced that does NOT need `Payload` (e.g., a lightweight index endpoint); (c) profiling shows that the reader path is bottlenecked on column materialization rather than payload deserialization.
+
+**Design sketch**: Add a lean `EntityReadModel` (or per-endpoint read models) in Infrastructure. `EntityQueries.ListAsync` and `FindByIdAsync` project via `.Select(e => new EntityReadModel { ... })`. Handler `Map` methods rebind to the read model shape. Two implementations of `IEntityQueries` may coexist during migration behind a feature flag if the reader is critical-path.
+
+**Related ADRs**: ADR-010.

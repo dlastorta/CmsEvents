@@ -695,7 +695,9 @@ Two distinct data access patterns exist: write path (event batch processing with
 
 **Application layer has no dependency on `Microsoft.EntityFrameworkCore`** — repository interfaces expose only Domain types and primitives. Handlers are ORM-agnostic; the ORM lives entirely in Infrastructure.
 
-**Schema declarations shared**: both `DbContext` types declare the same `DbSet<Entity>` and reuse the same `IEntityTypeConfiguration<T>` files. Per-query optimization happens through `AsNoTracking` + projections, not through parallel read models.
+**Schema declarations shared**: both `DbContext` types declare the same `DbSet<Entity>` and reuse the same `IEntityTypeConfiguration<T>` files. The design reserves per-query optimization to two techniques applied on the reader side — `AsNoTracking` (or `NoTrackingWithIdentityResolution`, currently set globally on `ReaderDbContext`) and, if needed, LINQ `.Select(...)` projections — rather than to parallel read models that require duplicate schema maintenance.
+
+**Current state of projections**: `EntityQueries.ListAsync` and `EntityQueries.FindByIdAsync` materialize the full `Entity` row rather than projecting to a lean read model. Rationale: the response DTO (`EntityResponse`) consumes 6 of the 8 entity columns; the only columns projection would skip today are `CreatedAt` and `UpdatedAt` (~16 bytes per row), while the largest column (`Payload`, opaque JSON) is required by the response and would remain on the query. The ceremony of maintaining a separate read model would exceed the bandwidth savings at current scale. Projections become worthwhile when the API-visible field count diverges further from the persisted schema (e.g., admin-only audit fields, denormalized aggregates, or a payload column that is often not needed by list endpoints). See `future-improvements.md` § Reader-side projections.
 
 **Connection string strategy**:
 
