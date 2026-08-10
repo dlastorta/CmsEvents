@@ -11,18 +11,19 @@
 | **Branch coverage** | **72%** | Not formally targeted | Solid — see gaps below |
 | **Cyclomatic max** | ≤ 10 (after two extract-method refactors) | ≤ 20 recommended | No hotspots |
 
-Numbers reflect the merged report from `dotnet test --collect:"XPlat Code Coverage"` across all three tiers after clearing stale TestResults. Two rounds of iterative fixes contributed the final gains:
+Numbers reflect the merged report from `dotnet test --collect:"XPlat Code Coverage"` across all three tiers after clearing stale TestResults. Rounds of iterative fixes:
 
 - **Round 1** (initial): 79% line / 67% branch — snapshot after removing stale coverage files from previous builds.
-- **Round 2** (final): 85% line / 72% branch — after applying:
+- **Round 2**: 85% line / 72% branch — after applying:
   - `ProcessingOptions` instantiated via `configuration.Get<T>()` (was 0% because the class was never constructed, only used to name a config key).
   - 11 new integration tests covering `GET /entities`, `GET /entities/{id}`, `POST /disable`, `POST /enable` (previously only `POST /cms/events` was integration-tested).
+- **Round 3** (post-review): additional tests added in response to the external code review — invalid-credential auth paths, `SqlExceptionClassifier` unit matrix, `EvaluateForDelete` branches, validator boundary tests (delete-with-version, payload size cap). Fresh numbers were not captured before this note was written; re-run `dotnet test --collect:"XPlat Code Coverage"` locally for the current figures. The new tests raise line + branch coverage, they do not lower it.
 
 Line coverage well above target. Branch coverage naturally lags line coverage in any project that has defensive guards and environment-conditional setup code — the gaps documented below explain why the remaining branches are legitimately uncovered by tests.
 
 ## Uncovered branches — accepted gaps
 
-The gap between 100% and 62.7% branch coverage lives in three categories, all of which are deliberate and low-risk. Attempting to cover them would either require executing code that only runs in production (Key Vault, App Insights) or writing tests that exercise unreachable/defensive paths.
+The gap between 100% and current branch coverage lives in four categories, all of which are deliberate and low-risk. Attempting to cover them would either require executing code that only runs in production (Key Vault, App Insights) or writing tests that exercise unreachable/defensive paths.
 
 ### Category 1: Environment-conditional configuration (Program.cs)
 
@@ -88,4 +89,4 @@ The `TryParseBasicHeader` helper is still at CC 8 due to the sequence of defensi
 
 ## Recommendation
 
-Coverage at 89.9% line / 62.7% branch is a strong result for the scope of this service. The uncovered branches are documented, low-risk, and would require disproportionate effort to reach 100%. Coverage is not a substitute for design review, and every remaining gap has been evaluated and accepted here.
+Coverage above the ≥ 75% line target is a strong result for the scope of this service (see the Summary table for the most-recently-captured Round 2 figures — 85% line / 72% branch — with Round 3 tests raising both). The uncovered branches are documented, low-risk, and would require disproportionate effort to reach 100%. Coverage is not a substitute for design review, and every remaining gap has been evaluated and accepted here.

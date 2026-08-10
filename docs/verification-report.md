@@ -133,7 +133,7 @@ Current behavior:
 ### ADR-014 — Observability — CONFORMS (with observation)
 
 - Serilog configured with Console + Application Insights sinks; JSON output template.
-- Log levels aligned with ADR — Info for applied events, Warning for skipped events (including `orphan_delete` and clock-skew — although clock skew is a drift per ADR-005), Error for permanent failures.
+- Log levels aligned with ADR — Info for applied events, Warning for skipped events (including `orphan_delete`, `stale_delete`, and clock-skew), Error for permanent failures.
 - OpenTelemetry: ASP.NET Core + HTTP + Azure Monitor exporter.
 - `CorrelationIdMiddleware` extracts/generates `X-Correlation-ID`, pushes to Serilog `LogContext`, sets on response headers.
 - `X-Batch-Id` set on `POST /cms/events` responses.

@@ -181,7 +181,7 @@ sequenceDiagram
             EvtHandler->>Writer: Insert / Update / Delete (per-event transaction)
             Writer-->>EvtHandler: committed
             EvtHandler->>EvtHandler: Log Info
-        else Skip (superseded, duplicate, orphan_delete)
+        else Skip (superseded, duplicate, orphan_delete, stale_delete)
             EvtHandler->>EvtHandler: Log Warning
         else Fail (validation, retries exhausted)
             EvtHandler->>EvtHandler: Log Error
@@ -325,7 +325,7 @@ Full field reference for structured logs produced by Serilog per ADR-014.
 |-------|-------------|
 | `Debug` | Idempotency comparisons (disabled in production) |
 | `Info` | Event applied, batch completed, request received |
-| `Warning` | Skipped events (`superseded_by_version`, `duplicate`, `orphan_delete`), clock-skew events per ADR-005, 4xx responses, 429 rate limit rejections |
+| `Warning` | Skipped events (`superseded_by_version`, `duplicate`, `orphan_delete`, `stale_delete`), clock-skew events per ADR-005, 4xx responses, 429 rate limit rejections |
 | `Error` | Permanent failures, 5xx responses, transient failure retry exhaustion with internal cause (e.g., "DB deadlock persisted after 3 retries") |
 
 ### Privacy and cost

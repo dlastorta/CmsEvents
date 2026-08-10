@@ -304,8 +304,9 @@ If a `publish` event arrives after a `delete` for the same id due to out-of-orde
 
 **Validation errors** (event rejected as permanent failure per ADR-008; batch processing continues with remaining events):
 
-- Missing or non-monotonic `version` on `publish` or `unPublish`.
+- Missing `version` on `publish` or `unPublish`, or `version < 1`. A **non-monotonic** version (lower than what's stored, or lower than a version already applied in the same batch) is NOT a validation error — it is handled by the idempotency rule above and skipped as `superseded_by_version`.
 - Missing or malformed `timestamp` on any event.
+- Stray `version` field on a `delete` event, or `payload` exceeding the size cap (see ADR-008 § Input validation).
 
 **Observability warnings** (do not alter the idempotency decision — the event is still evaluated by the rule above):
 
@@ -335,7 +336,7 @@ Rule applies uniformly across `publish` and `unPublish` (see ADR-006 for orphan-
 
 **Trade-offs**:
 
-- CMS must send monotonic version per entity for `publish`/`unPublish`; missing or non-monotonic → permanent failure per event.
+- CMS must send a `version` field on `publish`/`unPublish`; missing → permanent `validation_error` per event. Non-monotonic version (lower than what's stored) is NOT rejected — it is skipped as `superseded_by_version` by the idempotency rule, so retries and reorderings are safe by design.
 - Millisecond precision assumed for tie-breaking; risk documented if CMS emits second-precision under rapid republish.
 - Skips and warnings are logged, not silent — observability (ADR-014) surfaces both as anomaly signals.
 - Sustained producer clock skew > 24h relative to UTC generates warning noise; if observed, iterate to hard rejection.
@@ -395,7 +396,7 @@ The spec explicitly calls out one variation of this scenario: *"an entity with v
 **Positive**:
 
 - Unpublish out-of-order handled deterministically without buffering or coordination.
-- Orphan deletes surfaced as failures — producer bugs cannot silently corrupt state.
+- Orphan deletes surfaced as **anomalies in structured logs** (Warning-level with full context) — producer bugs and delivery-order issues are visible to the dev team without adding noise to producer-facing responses.
 - Consistent with idempotency contract (ADR-005) and traceability policy (ADR-014).
 
 **Trade-offs**:
@@ -408,7 +409,7 @@ The spec explicitly calls out one variation of this scenario: *"an entity with v
 
 - ADR-005 (Version + Timestamp Idempotency)
 - ADR-007 (Local Disabled Flag Separate from CMS Publication State) — query filtering interacts with unpublished-status entities.
-- ADR-008 (Sync Batch Processing) — orphan delete reported as permanent failure.
+- ADR-008 (Sync Batch Processing) — orphan delete counted as skipped in the batch response (not itemized in `errors[]`); Warning-level log carries full context.
 - ADR-014 (Observability) — logged with full context.
 
 ---
@@ -529,9 +530,15 @@ Failure classification:
 
 - `type` — enum `{publish, unPublish, delete}`, case-sensitive per sample.
 - `id` — non-null, non-empty string.
-- `version` — integer >= 1; required for `publish`/`unPublish`, absent for `delete`.
+- `version` — integer >= 1; required for `publish`/`unPublish`; **must be absent for `delete`** (a stray version field signals a malformed producer contract and is rejected rather than silently ignored).
 - `timestamp` — valid ISO 8601 UTC.
 - `payload` — non-null JSON object for `publish`/`unPublish`; absent for `delete`. Internal structure opaque per spec.
+
+**Payload sanitization** (per spec item 2 — "validated and sanitized"):
+
+- Structural sanitization is enforced by the JSON deserializer at the transport boundary: malformed JSON never reaches the validator; the payload is exposed as a `JsonElement` and cannot carry non-JSON content.
+- **Size cap**: payload UTF-8 byte length must be `<= 64 KiB` (`CmsEventValidator.MaxPayloadBytes`). Chosen an order of magnitude above any realistic CMS entity body while capping DoS-adjacent scenarios where a producer submits multi-MB payloads that would inflate log lines, DB rows, and memory pressure. Configurable in a future revision if the CMS emits larger legitimate bodies.
+- Schema-level sanitization (e.g., HTML stripping, allow-listed fields) is deliberately NOT applied — the spec declares the payload opaque and the service does not render it.
 
 Validation failure → permanent failure with `validation_error` reason.
 
@@ -548,7 +555,7 @@ Rule of thumb: **if a failure should halt the whole request, put the validator i
 - Body includes: `batchId`, `correlationId`, counts (`totalEvents`, `processed`, `skipped`, `failed`) as flat top-level fields, and `errors[]` array with per-event details for **failed events only**.
 - **Skipped events are counted but not itemized in the response** — they are outcomes under idempotency (retry-safe behavior) or orphan-delete no-ops (per ADR-006). Skipped events appear in structured logs per ADR-014.
 - Failure `reason` enum (present in response `errors[]`): `validation_error`, `processing_timeout`, `persistence_error`, `unknown_event_type`. Producer-facing details use non-technical wording (no internal implementation leaks).
-- Skip `reason` enum (logs only, not response): `superseded_by_version`, `duplicate`, `orphan_delete`.
+- Skip `reason` enum (logs only, not response): `superseded_by_version`, `duplicate`, `orphan_delete`, `stale_delete`.
 - Full schema and per-scenario examples in `responses.md`.
 
 ### Alternatives Considered
