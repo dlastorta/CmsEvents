@@ -12,7 +12,7 @@ using Xunit;
 /// </summary>
 public sealed class CmsEventValidatorTests
 {
-    private static readonly DateTime ValidTimestamp = new(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc);
+    private const string ValidTimestamp = "2026-08-01T10:00:00Z";
     private static readonly JsonElement EmptyPayload = JsonDocument.Parse("{}").RootElement;
 
     private readonly CmsEventValidator _sut = new();

@@ -1,5 +1,6 @@
 namespace CmsEvents.Contracts.Events;
 
+using System.Globalization;
 using System.Text.Json;
 
 /// <summary>
@@ -15,6 +16,9 @@ using System.Text.Json;
 /// Constraints per ADR-008:
 /// - Type is case-sensitive, one of: publish, unPublish, delete.
 /// - Version is required for publish/unPublish, absent for delete; when present, must be &gt;= 1.
+/// - Timestamp is a string in ISO 8601 UTC. Bound as string (not DateTime) so that a single malformed
+///   event does not throw during JSON deserialization and break the whole batch — the validator
+///   surfaces it as a per-event validation_error per ADR-008 "one bad event should not block valid ones".
 /// - Payload is required for publish/unPublish, absent for delete; internal structure is opaque.
 /// </summary>
 public sealed class CmsEventEnvelope
@@ -25,7 +29,25 @@ public sealed class CmsEventEnvelope
 
     public int? Version { get; init; }
 
-    public DateTime Timestamp { get; init; }
+    public string? Timestamp { get; init; }
 
     public JsonElement? Payload { get; init; }
+
+    /// <summary>
+    /// Parses <see cref="Timestamp"/> as UTC. Call ONLY after <c>CmsEventValidator</c> has
+    /// confirmed the value is a valid ISO 8601 UTC string — otherwise this throws.
+    /// </summary>
+    public DateTime GetTimestampUtc()
+    {
+        if (string.IsNullOrEmpty(Timestamp))
+        {
+            throw new InvalidOperationException(
+                "Timestamp is null or empty. Validator should have rejected this event.");
+        }
+
+        return DateTime.Parse(
+            Timestamp,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+    }
 }

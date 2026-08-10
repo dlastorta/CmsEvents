@@ -17,6 +17,7 @@ using Xunit;
 public sealed class DeleteEventHandlerTests
 {
     private static readonly DateTime Now = new(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc);
+    private const string NowIso = "2026-08-01T10:00:00Z";
 
     [Fact]
     public async Task Delete_ForOrphan_ReturnsSkipped_WithOrphanReason()
@@ -29,7 +30,7 @@ public sealed class DeleteEventHandlerTests
         var sut = new DeleteEventHandler(repository.Object, NullLogger<DeleteEventHandler>.Instance);
 
         var outcome = await sut.HandleAsync(
-            new CmsEventEnvelope { Type = CmsEventType.Delete, Id = "missing-id", Timestamp = Now },
+            new CmsEventEnvelope { Type = CmsEventType.Delete, Id = "missing-id", Timestamp = NowIso },
             CancellationToken.None);
 
         outcome.Type.Should().Be(EventOutcomeType.Skipped);
@@ -50,7 +51,7 @@ public sealed class DeleteEventHandlerTests
         var sut = new DeleteEventHandler(repository.Object, NullLogger<DeleteEventHandler>.Instance);
 
         var outcome = await sut.HandleAsync(
-            new CmsEventEnvelope { Type = CmsEventType.Delete, Id = "id-1", Timestamp = Now },
+            new CmsEventEnvelope { Type = CmsEventType.Delete, Id = "id-1", Timestamp = NowIso },
             CancellationToken.None);
 
         outcome.Type.Should().Be(EventOutcomeType.Processed);

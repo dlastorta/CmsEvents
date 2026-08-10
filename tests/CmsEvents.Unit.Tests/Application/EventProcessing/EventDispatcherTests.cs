@@ -86,6 +86,6 @@ public sealed class EventDispatcherTests
     {
         Type = type,
         Id = id,
-        Timestamp = new DateTime(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc),
+        Timestamp = "2026-08-01T10:00:00Z",
     };
 }

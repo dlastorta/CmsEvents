@@ -17,7 +17,7 @@ using Xunit;
 [Collection(nameof(IntegrationTestCollection))]
 public sealed class EntitiesEndpointsTests
 {
-    private static readonly DateTime NowUtc = new(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc);
+    private const string NowIso = "2026-08-01T10:00:00Z";
     private readonly CmsEventsWebAppFactory _factory;
 
     public EntitiesEndpointsTests(CmsEventsWebAppFactory factory)
@@ -216,7 +216,7 @@ public sealed class EntitiesEndpointsTests
                 Type = CmsEventType.Publish,
                 Id = $"published-{run}",
                 Version = 1,
-                Timestamp = NowUtc,
+                Timestamp = NowIso,
                 Payload = JsonDocument.Parse("{\"title\":\"published\"}").RootElement,
             },
             new CmsEventEnvelope
@@ -224,7 +224,7 @@ public sealed class EntitiesEndpointsTests
                 Type = CmsEventType.UnPublish,
                 Id = $"unpublished-{run}",
                 Version = 1,
-                Timestamp = NowUtc,
+                Timestamp = NowIso,
                 Payload = JsonDocument.Parse("{\"title\":\"orphan-unpub\"}").RootElement,
             },
         };

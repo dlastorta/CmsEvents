@@ -1,5 +1,6 @@
 namespace CmsEvents.Infrastructure.Persistence.Repositories;
 
+using CmsEvents.Application.Common.Exceptions;
 using CmsEvents.Application.Common.Repositories;
 using CmsEvents.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
@@ -25,8 +26,21 @@ public sealed class EntityRepository : IEntityRepository
 
     public void Remove(Entity entity) => _dbContext.Entities.Remove(entity);
 
-    public Task<int> SaveChangesAsync(CancellationToken cancellationToken = default) =>
-        _dbContext.SaveChangesAsync(cancellationToken);
+    public async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException ex)
+        {
+            // Wrap as domain-facing transient exception per ADR-010 (Application must not depend
+            // on EF Core). Handlers catch TransientPersistenceException to trigger Polly retry
+            // per ADR-008. Non-DbUpdateException failures propagate as-is to the global handler → 500.
+            throw new TransientPersistenceException(
+                "Persistence layer transient failure — retry recommended.", ex);
+        }
+    }
 
     public async Task ExecuteInTransactionAsync(
         Func<CancellationToken, Task> action,

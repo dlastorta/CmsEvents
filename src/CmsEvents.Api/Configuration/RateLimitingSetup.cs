@@ -2,6 +2,8 @@ namespace CmsEvents.Api.Configuration;
 
 using System.Globalization;
 using System.Threading.RateLimiting;
+using CmsEvents.Api.Middleware;
+using CmsEvents.Contracts.Responses;
 using Microsoft.AspNetCore.RateLimiting;
 
 /// <summary>
@@ -19,7 +21,7 @@ public static class RateLimitingSetup
         services.AddRateLimiter(options =>
         {
             options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
-            options.OnRejected = SetRetryAfterHeader;
+            options.OnRejected = WriteRejectionResponseAsync;
             options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
                 RateLimitPartition.GetSlidingWindowLimiter(
                     partitionKey: BuildPartitionKey(context),
@@ -35,22 +37,66 @@ public static class RateLimitingSetup
         return services;
     }
 
-    private static ValueTask SetRetryAfterHeader(OnRejectedContext context, CancellationToken _)
+    /// <summary>
+    /// Fallback Retry-After when the limiter does not emit metadata. Matches the sliding-window
+    /// segment duration (Window 60s / 6 segments = 10s per segment) — the minimum time before
+    /// the oldest segment expires and one permit becomes available.
+    /// </summary>
+    private const int DefaultRetryAfterSeconds = 10;
+
+    /// <summary>
+    /// Writes the 429 response body per <c>responses.md</c> (correlationId + error + retryAfterSeconds)
+    /// and sets the <c>Retry-After</c> header. Called by the rate limiter on rejection.
+    ///
+    /// The sliding-window limiter with <c>QueueLimit=0</c> does not always emit
+    /// <see cref="MetadataName.RetryAfter"/> metadata — falls back to the segment duration to
+    /// guarantee the producer always sees an actionable hint.
+    /// </summary>
+    private static async ValueTask WriteRejectionResponseAsync(OnRejectedContext context, CancellationToken cancellationToken)
     {
+        var retryAfterSeconds = DefaultRetryAfterSeconds;
         if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
         {
-            context.HttpContext.Response.Headers.RetryAfter =
-                ((int)retryAfter.TotalSeconds).ToString(CultureInfo.InvariantCulture);
+            retryAfterSeconds = Math.Max((int)retryAfter.TotalSeconds, 1);
         }
 
-        return ValueTask.CompletedTask;
+        context.HttpContext.Response.Headers["Retry-After"] =
+            retryAfterSeconds.ToString(CultureInfo.InvariantCulture);
+
+        var correlationId = context.HttpContext.Items[CorrelationIdMiddleware.HttpContextItemKey] is Guid id
+            ? id
+            : Guid.NewGuid();
+
+        var envelope = new ErrorEnvelope
+        {
+            CorrelationId = correlationId,
+            Error = "rate_limit_exceeded",
+            RetryAfterSeconds = retryAfterSeconds,
+        };
+
+        context.HttpContext.Response.ContentType = "application/json";
+        await context.HttpContext.Response
+            .WriteAsJsonAsync(envelope, cancellationToken)
+            .ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Per ADR-013 (revised): partition key is <c>user:{username}:{path}</c> for authenticated
+    /// requests — per-user per-endpoint bucket, so a burst on /cms/events does not exhaust a
+    /// user's ability to query /entities. Falls back to <c>ip:{remote}</c> for the edge case where
+    /// an unauthenticated request reaches the limiter (should not happen — auth middleware runs first).
+    /// </summary>
     private static string BuildPartitionKey(HttpContext context)
     {
-        var user = context.User.Identity?.Name ?? "anonymous";
-        var path = context.Request.Path.Value ?? string.Empty;
-        return $"{user}:{path}";
+        var user = context.User.Identity?.Name;
+        if (!string.IsNullOrEmpty(user))
+        {
+            var path = context.Request.Path.Value ?? string.Empty;
+            return $"user:{user}:{path}";
+        }
+
+        var ip = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        return $"ip:{ip}";
     }
 
     private static int ResolvePermitLimit(HttpContext context, RateLimitBounds limits)

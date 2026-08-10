@@ -33,16 +33,21 @@ public sealed class UnPublishEventHandler : IEventHandler
     public async Task<EventOutcome> HandleAsync(CmsEventEnvelope evt, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(evt);
+        using var activity = EventProcessingActivitySource.Instance.StartActivity($"ProcessEvent.{EventType}");
+        activity?.SetTag("event.id", evt.Id);
+        activity?.SetTag("event.version", evt.Version);
+
         var version = evt.Version ?? throw new InvalidOperationException("UnPublish event must have a version (validation should catch this).");
         var payload = evt.Payload?.GetRawText() ?? throw new InvalidOperationException("UnPublish event must have a payload (validation should catch this).");
 
+        var timestamp = evt.GetTimestampUtc();
         var existing = await _repository.FindByIdAsync(evt.Id, cancellationToken);
         var now = _clock.UtcNow;
 
         if (existing is null)
         {
             // Orphan unpublish — spec corner case (ADR-006). Upsert with Status=Unpublished.
-            var created = Entity.CreateOrphanFromUnpublish(evt.Id, version, evt.Timestamp, payload, now);
+            var created = Entity.CreateOrphanFromUnpublish(evt.Id, version, timestamp, payload, now);
             await _repository.AddAsync(created, cancellationToken);
             await _repository.SaveChangesAsync(cancellationToken);
             _logger.LogInformation(
@@ -50,7 +55,7 @@ public sealed class UnPublishEventHandler : IEventHandler
             return EventOutcome.Processed();
         }
 
-        var decision = existing.EvaluateForApply(version, evt.Timestamp);
+        var decision = existing.EvaluateForApply(version, timestamp);
         if (decision.Outcome == IdempotencyOutcome.Skip)
         {
             _logger.LogWarning(
@@ -59,7 +64,7 @@ public sealed class UnPublishEventHandler : IEventHandler
             return EventOutcome.Skipped(decision.SkipReason!);
         }
 
-        existing.ApplyUnpublish(version, evt.Timestamp, payload, now);
+        existing.ApplyUnpublish(version, timestamp, payload, now);
         await _repository.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("UnPublish applied: id={Id}, version={Version}", evt.Id, version);
         return EventOutcome.Processed();

@@ -17,7 +17,7 @@ using Xunit;
 [Collection(nameof(IntegrationTestCollection))]
 public sealed class CmsEventsEndpointTests
 {
-    private static readonly DateTime NowUtc = new(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc);
+    private const string NowIso = "2026-08-01T10:00:00Z";
     private readonly CmsEventsWebAppFactory _factory;
 
     public CmsEventsEndpointTests(CmsEventsWebAppFactory factory)
@@ -82,7 +82,7 @@ public sealed class CmsEventsEndpointTests
             {
                 Type = CmsEventType.Delete,
                 Id = "definitely-does-not-exist-" + Guid.NewGuid().ToString("N"),
-                Timestamp = NowUtc,
+                Timestamp = NowIso,
             },
         };
 
@@ -100,7 +100,7 @@ public sealed class CmsEventsEndpointTests
         Type = CmsEventType.Publish,
         Id = id,
         Version = version,
-        Timestamp = NowUtc,
+        Timestamp = NowIso,
         Payload = JsonDocument.Parse("{\"title\":\"integration-test\"}").RootElement,
     };
 }

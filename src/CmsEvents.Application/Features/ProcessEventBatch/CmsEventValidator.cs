@@ -1,5 +1,6 @@
 namespace CmsEvents.Application.Features.ProcessEventBatch;
 
+using System.Globalization;
 using CmsEvents.Contracts.Events;
 using FluentValidation;
 
@@ -25,8 +26,9 @@ public sealed class CmsEventValidator : AbstractValidator<CmsEventEnvelope>
             .WithMessage("Id must be non-empty.");
 
         RuleFor(e => e.Timestamp)
-            .Must(ts => ts.Kind == DateTimeKind.Utc || ts != default)
-            .WithMessage("Timestamp must be a valid ISO 8601 UTC value.");
+            .NotEmpty()
+            .Must(BeValidIso8601Utc)
+            .WithMessage("Timestamp must be a valid ISO 8601 UTC value (e.g., \"2026-08-01T10:00:00Z\").");
 
         // Version required for publish/unPublish; must be absent for delete.
         RuleFor(e => e.Version)
@@ -41,4 +43,12 @@ public sealed class CmsEventValidator : AbstractValidator<CmsEventEnvelope>
             .When(e => e.Type is CmsEventType.Publish or CmsEventType.UnPublish)
             .WithMessage("Payload must be a non-null JSON object for publish/unPublish events.");
     }
+
+    private static bool BeValidIso8601Utc(string? value) =>
+        !string.IsNullOrEmpty(value) &&
+        DateTime.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal,
+            out _);
 }

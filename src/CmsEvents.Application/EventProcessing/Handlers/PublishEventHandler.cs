@@ -34,22 +34,27 @@ public sealed class PublishEventHandler : IEventHandler
     public async Task<EventOutcome> HandleAsync(CmsEventEnvelope evt, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(evt);
+        using var activity = EventProcessingActivitySource.Instance.StartActivity($"ProcessEvent.{EventType}");
+        activity?.SetTag("event.id", evt.Id);
+        activity?.SetTag("event.version", evt.Version);
+
         var version = evt.Version ?? throw new InvalidOperationException("Publish event must have a version (validation should catch this).");
         var payload = evt.Payload?.GetRawText() ?? throw new InvalidOperationException("Publish event must have a payload (validation should catch this).");
 
+        var timestamp = evt.GetTimestampUtc();
         var existing = await _repository.FindByIdAsync(evt.Id, cancellationToken);
         var now = _clock.UtcNow;
 
         if (existing is null)
         {
-            var created = Entity.CreateFromPublish(evt.Id, version, evt.Timestamp, payload, now);
+            var created = Entity.CreateFromPublish(evt.Id, version, timestamp, payload, now);
             await _repository.AddAsync(created, cancellationToken);
             await _repository.SaveChangesAsync(cancellationToken);
             _logger.LogInformation("Publish applied (new): id={Id}, version={Version}", evt.Id, version);
             return EventOutcome.Processed();
         }
 
-        var decision = existing.EvaluateForApply(version, evt.Timestamp);
+        var decision = existing.EvaluateForApply(version, timestamp);
         if (decision.Outcome == IdempotencyOutcome.Skip)
         {
             _logger.LogWarning(
@@ -58,7 +63,7 @@ public sealed class PublishEventHandler : IEventHandler
             return EventOutcome.Skipped(decision.SkipReason!);
         }
 
-        existing.ApplyPublish(version, evt.Timestamp, payload, now);
+        existing.ApplyPublish(version, timestamp, payload, now);
         await _repository.SaveChangesAsync(cancellationToken);
         _logger.LogInformation("Publish applied (update): id={Id}, version={Version}", evt.Id, version);
         return EventOutcome.Processed();

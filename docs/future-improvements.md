@@ -93,6 +93,20 @@ Companion documents:
 
 ---
 
+## 5b. Rate-limit partition key by route pattern (not literal path)
+
+**Context**: `RateLimitingSetup.BuildPartitionKey` uses `user:{username}:{path}` where `path` is the literal request URI. This means `/entities/entity-a/disable` and `/entities/entity-b/disable` count against different buckets, so an admin can disable many entities in a short window without triggering the limit.
+
+**Why not now**: The permissive-only nature means users can do more than expected, not less — no correctness bug. Reworking to route-pattern grouping (`user:admin:disable-endpoint`) requires either route metadata lookup or a policy naming convention.
+
+**Trigger**: An admin abuse scenario emerges (single admin flapping many entity states in rapid succession) that a per-endpoint bucket would prevent.
+
+**Design sketch**: Extract the route template (e.g., `/entities/{id}/disable`) instead of the resolved path when building the partition key. `context.GetEndpoint()?.Metadata.GetMetadata<RouteNameMetadata>()` or `HttpContext.GetRouteData()` provide the template.
+
+**Related ADRs**: ADR-013.
+
+---
+
 ## 6. Audit trail for admin actions
 
 **Context**: ADR-007 uses a single `IsDisabled` boolean without tracking who set it or when. Support workflows requiring "who disabled entity X on 2026-08-01?" cannot be answered from the current schema alone (though Application Insights logs contain the information).

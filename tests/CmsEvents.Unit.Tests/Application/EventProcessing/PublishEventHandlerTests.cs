@@ -18,6 +18,7 @@ using Xunit;
 public sealed class PublishEventHandlerTests
 {
     private static readonly DateTime Now = new(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc);
+    private const string NowIso = "2026-08-01T10:00:00Z";
     private static readonly JsonElement Payload = JsonDocument.Parse("{\"title\":\"hello\"}").RootElement;
 
     [Fact]
@@ -89,7 +90,7 @@ public sealed class PublishEventHandlerTests
         Type = CmsEventType.Publish,
         Id = id,
         Version = version,
-        Timestamp = Now,
+        Timestamp = NowIso,
         Payload = Payload,
     };
 }

@@ -178,7 +178,7 @@ EventProcessing/
 Common/
 ```
 
-Each feature folder contains its command/query, handler, and validator.
+Each feature folder contains its command/query, handler, and — **when the input requires validation beyond route-parameter and auth-role checks** — a FluentValidation validator. In this codebase only `ProcessEventBatch` currently has a validator (`CmsEventValidator`) because it accepts a JSON body per event that requires cross-field rules. `ListEntities`, `GetEntity`, `DisableEntity`, and `EnableEntity` take only route parameters and headers (validated by the framework and by authorization policies per ADR-011), so no explicit validator is needed. Adding one when a feature grows a body is a per-feature call.
 
 Shared code lives in `Common/` only after the **Rule of Three** applies — code is duplicated across at least three features before being extracted. Premature abstraction is worse than duplication for a small codebase.
 
@@ -906,11 +906,13 @@ Layered configuration per .NET convention with environment-specific secret store
 
 ## ADR-013: Rate Limiting
 
-**Status**: Accepted
+**Status**: Accepted (beyond spec — see below)
 
 **Date**: August 2026
 
 **Proposed by**: Diego Lastorta
+
+**Beyond spec**: The assignment does not require rate limiting. This ADR is included as a defensive-design decision aligned with treating the deliverable as the first sprint of a real product rather than a time-boxed PoC. If the project were rescoped to strict spec compliance, this feature would be removed as a whole (delete `RateLimitingSetup.cs`, `RateLimitingTests.cs`, the `services.AddRateLimitingPolicies(...)` call in `Program.cs`, and mark this ADR as `Superseded`). Kept because the code is self-contained (one file + one config section) and demonstrates production-oriented thinking; explicitly documented so it is not confused with a spec requirement.
 
 ### Context
 
@@ -975,6 +977,7 @@ Ordering ensures rate limits apply per-user, not per-IP. Unauthenticated request
 
 - Limits are heuristics; production tuning expected as traffic patterns emerge.
 - Sliding window state held per instance; behind a load balancer, each instance tracks its own bucket — effective aggregate limit is `perInstance × instanceCount`. Multi-instance precision requires distributed store (Redis) — deferred to `future-improvements.md` if evidence emerges.
+- **Partition key includes literal request path** (e.g., `user:admin:/entities/abc/disable`). This means `/entities/abc/disable` and `/entities/xyz/disable` count against different buckets even for the same admin user. Intended reading of the ADR is "per user, per endpoint kind" — the current implementation is "per user, per URL" which is more granular than the ADR text suggests. Refining to route-pattern grouping (`user:admin:disable-endpoint`) is deferred to `future-improvements.md`; not blocking because the current behavior is permissive-only (users can do more), not restrictive.
 - Retry-After hint is application-layer; upstream infrastructure may not honor it, requiring producer-side retry logic.
 
 ### Related ADRs

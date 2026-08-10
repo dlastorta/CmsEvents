@@ -4,6 +4,27 @@ A .NET 9 web service that ingests CMS webhook events, persists them to SQL Serve
 
 Design decisions live in `docs/decisions.md` (16 ADRs). Companion docs cover architecture, response contracts, deferred improvements, and operational runbooks.
 
+## Design philosophy — product-first, not time-boxed PoC
+
+The assignment is *"intentionally open-ended"* and does not specify a deadline. That framing was read as an invitation to treat the deliverable as the first sprint of a real service rather than a minimum-viable proof of concept — favoring long-term structural cost over near-term implementation speed.
+
+Consequences of this framing that go beyond strict spec compliance:
+
+| Feature | Spec required? | Rationale for inclusion |
+|---------|---------------|-------------------------|
+| Rate limiting (ADR-013) | No | Defensive posture for a public HTTP endpoint. Isolated in `RateLimitingSetup.cs` — trivial to remove if rescoped. |
+| OpenTelemetry distributed tracing (ADR-014) | Spec item 6 asks for "log processed events" only | Adds `traceparent` propagation + span attributes per event. Console exporter in dev, Application Insights in prod. |
+| Application Insights Serilog sink (ADR-014) | No | Conditional on `Observability:ApplicationInsightsConnectionString` — off in dev, on in prod. |
+| Docker + docker-compose (ADR-012, README) | Spec asks for platform-agnostic build (Mac/Windows) | Docker satisfies this and gives a one-command local DB. |
+| GitHub Actions CI (`.github/workflows/ci.yml`) | Spec asks for a GitHub repo only | CI runs the three test tiers on every push, adds a Docker build validation. |
+| Managed Identity + Azure Key Vault (ADR-012) | Spec asks for random-GUID passwords | Design shows the intended production secret-store hookup; local dev uses User Secrets. |
+| 90-day secret rotation runbook (`docs/runbook-secret-rotation.md`) | No | Operational documentation that would be expected in production. |
+| Repository pattern with ORM-agnostic Application (ADR-010) | No | Chose stricter Clean Architecture even though a simpler `IApplicationDbContext` pattern would satisfy the spec. |
+
+If this were scoped as a two-hour PoC, several of these would be trimmed. Documented explicitly so a reviewer can distinguish "spec compliance" from "additional production polish" and evaluate each independently. Every feature above is orthogonal — remove any one and the rest continues to work.
+
+**Spec priorities** (`"correctness, structure, and clarity of the system. Correct event processing is the most important part."`) are the primary drivers of every design decision. The additions above should not obscure the core: idempotent per-event processing (ADR-005, ADR-006, ADR-008), reader/writer split (ADR-010), authenticated API surface (ADR-011), and the boundary discipline that keeps them separable (ADR-001, ADR-002).
+
 ## Prerequisites
 
 - [.NET 9 SDK](https://dotnet.microsoft.com/download/dotnet/9.0) (>= 9.0.100).

@@ -8,7 +8,9 @@ using CmsEvents.Api.Configuration;
 using CmsEvents.Api.Endpoints;
 using CmsEvents.Api.Middleware;
 using CmsEvents.Application.DependencyInjection;
+using CmsEvents.Application.EventProcessing;
 using CmsEvents.Infrastructure.DependencyInjection;
+using Microsoft.ApplicationInsights.Extensibility;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Trace;
 using Serilog;
@@ -76,15 +78,27 @@ public class Program
 
     private static void ConfigureSerilog(WebApplicationBuilder builder)
     {
-        builder.Host.UseSerilog((context, services, config) => config
-            .ReadFrom.Configuration(context.Configuration)
-            .ReadFrom.Services(services)
-            .Enrich.FromLogContext()
-            .WriteTo.Console(
-                outputTemplate:
-                    "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}",
-                formatProvider: CultureInfo.InvariantCulture)
-            .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning));
+        builder.Host.UseSerilog((context, services, config) =>
+        {
+            config
+                .ReadFrom.Configuration(context.Configuration)
+                .ReadFrom.Services(services)
+                .Enrich.FromLogContext()
+                .WriteTo.Console(
+                    outputTemplate:
+                        "[{Timestamp:HH:mm:ss} {Level:u3}] {CorrelationId} {Message:lj}{NewLine}{Exception}",
+                    formatProvider: CultureInfo.InvariantCulture)
+                .MinimumLevel.Override("Microsoft.AspNetCore", LogEventLevel.Warning);
+
+            // Application Insights sink per ADR-014 — production only (conditional on connection string).
+            var aiConnection = context.Configuration["Observability:ApplicationInsightsConnectionString"];
+            if (!string.IsNullOrWhiteSpace(aiConnection))
+            {
+                var telemetryConfig = TelemetryConfiguration.CreateDefault();
+                telemetryConfig.ConnectionString = aiConnection;
+                config.WriteTo.ApplicationInsights(telemetryConfig, TelemetryConverter.Traces);
+            }
+        });
     }
 
     private static void ConfigureServices(WebApplicationBuilder builder)
@@ -122,6 +136,9 @@ public class Program
         services.AddEndpointsApiExplorer();
         services.AddOpenApi();
         services.AddProblemDetails();
+
+        // Global exception handler per ADR-009 — returns 500 ErrorEnvelope on unhandled failures.
+        services.AddExceptionHandler<Middleware.GlobalExceptionHandler>();
     }
 
     private static void AddOpenTelemetry(IServiceCollection services, IConfiguration configuration)
@@ -134,7 +151,9 @@ public class Program
             {
                 tracing
                     .AddAspNetCoreInstrumentation()
-                    .AddHttpClientInstrumentation();
+                    .AddHttpClientInstrumentation()
+                    .AddEntityFrameworkCoreInstrumentation()
+                    .AddSource(EventProcessingActivitySource.Name);
 
                 if (!string.IsNullOrWhiteSpace(applicationInsightsConnectionString))
                 {
@@ -162,6 +181,8 @@ public class Program
 
     private static void ConfigurePipeline(WebApplication app)
     {
+        // ExceptionHandler must be early to catch failures from later middleware.
+        app.UseExceptionHandler(_ => { });
         app.UseSerilogRequestLogging();
         app.UseMiddleware<CorrelationIdMiddleware>();
 

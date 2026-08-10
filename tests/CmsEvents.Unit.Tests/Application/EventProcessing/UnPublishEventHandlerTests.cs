@@ -20,6 +20,7 @@ using Xunit;
 public sealed class UnPublishEventHandlerTests
 {
     private static readonly DateTime Now = new(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc);
+    private const string NowIso = "2026-08-01T10:00:00Z";
     private static readonly JsonElement Payload = JsonDocument.Parse("{\"title\":\"corner-case\"}").RootElement;
 
     [Fact]
@@ -108,7 +109,7 @@ public sealed class UnPublishEventHandlerTests
         Type = CmsEventType.UnPublish,
         Id = id,
         Version = version,
-        Timestamp = Now,
+        Timestamp = NowIso,
         Payload = Payload,
     };
 }

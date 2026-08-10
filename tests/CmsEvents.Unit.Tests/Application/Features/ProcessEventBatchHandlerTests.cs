@@ -1,6 +1,7 @@
 namespace CmsEvents.Unit.Tests.Application.Features;
 
 using System.Text.Json;
+using CmsEvents.Application.Common.Exceptions;
 using CmsEvents.Application.Common.Repositories;
 using CmsEvents.Application.EventProcessing;
 using CmsEvents.Application.Features.ProcessEventBatch;
@@ -19,6 +20,7 @@ using Xunit;
 public sealed class ProcessEventBatchHandlerTests
 {
     private static readonly DateTime Now = new(2026, 8, 1, 10, 0, 0, DateTimeKind.Utc);
+    private const string NowIso = "2026-08-01T10:00:00Z";
     private static readonly JsonElement Payload = JsonDocument.Parse("{}").RootElement;
 
     [Fact]
@@ -83,7 +85,7 @@ public sealed class ProcessEventBatchHandlerTests
             Type = CmsEventType.Publish,
             Id = "no-version",
             Version = null,
-            Timestamp = Now,
+            Timestamp = NowIso,
             Payload = Payload,
         };
 
@@ -137,7 +139,9 @@ public sealed class ProcessEventBatchHandlerTests
         handlerMock.SetupGet(h => h.EventType).Returns(CmsEventType.Publish);
         handlerMock
             .Setup(h => h.HandleAsync(It.IsAny<CmsEventEnvelope>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new InvalidOperationException("simulated transient DB error"));
+            .ThrowsAsync(new TransientPersistenceException(
+                "simulated transient DB error",
+                new InvalidOperationException("underlying")));
 
         var dispatcher = new EventDispatcher(new[] { handlerMock.Object });
         var sut = NewHandler(repository, dispatcher);
@@ -165,13 +169,13 @@ public sealed class ProcessEventBatchHandlerTests
         var clock = new FakeClock(Now);
         var sut = NewHandler(repository, dispatcher, clock: clock);
 
-        var farFuture = Now.AddDays(30); // > 24h threshold
+        // > 24h threshold — should trigger clock-skew Warning but not affect outcome.
         var evt = new CmsEventEnvelope
         {
             Type = CmsEventType.Publish,
             Id = "clock-skew",
             Version = 1,
-            Timestamp = farFuture,
+            Timestamp = "2026-09-01T10:00:00Z",
             Payload = Payload,
         };
 
@@ -200,7 +204,7 @@ public sealed class ProcessEventBatchHandlerTests
         Type = CmsEventType.Publish,
         Id = id,
         Version = version,
-        Timestamp = Now,
+        Timestamp = NowIso,
         Payload = Payload,
     };
 

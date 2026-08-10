@@ -1,5 +1,6 @@
 namespace CmsEvents.Application.Features.ProcessEventBatch;
 
+using CmsEvents.Application.Common.Exceptions;
 using CmsEvents.Application.Common.Repositories;
 using CmsEvents.Application.EventProcessing;
 using CmsEvents.Contracts.Events;
@@ -156,10 +157,10 @@ public sealed class ProcessEventBatchHandler : IRequestHandler<ProcessEventBatch
             _logger.LogWarning(ex, "Event {Index} has unknown type: id={Id}, type={Type}", index, evt.Id, evt.Type);
             return EventOutcome.Failed(reason: "unknown_event_type", detail: $"Type '{evt.Type}' is not recognized.");
         }
-        catch (Exception ex)
+        catch (TransientPersistenceException ex)
         {
-            // Transient retry exhausted — log internal cause (dev-facing) but return generic timeout reason
-            // to the producer (ADR-008: no internal implementation leak in response).
+            // Retry exhausted for a KNOWN transient DB failure. Log internal cause (dev-facing) but
+            // return generic timeout reason to the producer per ADR-008 (no implementation leak).
             _logger.LogError(ex,
                 "Event {Index} processing failed after {Retries} retries: id={Id}",
                 index, TransientRetryAttempts, evt.Id);
@@ -167,22 +168,27 @@ public sealed class ProcessEventBatchHandler : IRequestHandler<ProcessEventBatch
                 reason: "processing_timeout",
                 detail: "Processing failed, please retry this event");
         }
+
+        // Any other exception (system-wide failure, config error, bug) is intentionally NOT caught.
+        // It propagates to Api's GlobalExceptionHandler which returns HTTP 500 with batchId +
+        // correlationId per ADR-009 catastrophic-failure contract.
     }
 
     private static AsyncRetryPolicy BuildRetryPolicy() => Policy
-        .Handle<Exception>(ex => ex is not UnknownEventTypeException)
+        .Handle<TransientPersistenceException>()
         .WaitAndRetryAsync(RetryDelays);
 
     private void WarnIfClockSkew(CmsEventEnvelope evt, int index)
     {
         var now = _clock.UtcNow;
-        if (evt.Timestamp > now.Add(ClockSkewWarningThreshold))
+        var timestamp = evt.GetTimestampUtc();
+        if (timestamp > now.Add(ClockSkewWarningThreshold))
         {
             _logger.LogWarning(
                 "Event {Index} timestamp is more than {ThresholdHours}h in the future — " +
                 "possible clock skew or producer timezone misconfiguration. " +
                 "id={Id}, timestamp={Timestamp}, now={Now}",
-                index, ClockSkewWarningThreshold.TotalHours, evt.Id, evt.Timestamp, now);
+                index, ClockSkewWarningThreshold.TotalHours, evt.Id, timestamp, now);
         }
     }
 }

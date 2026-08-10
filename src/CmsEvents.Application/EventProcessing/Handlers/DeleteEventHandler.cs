@@ -28,6 +28,8 @@ public sealed class DeleteEventHandler : IEventHandler
     public async Task<EventOutcome> HandleAsync(CmsEventEnvelope evt, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(evt);
+        using var activity = EventProcessingActivitySource.Instance.StartActivity($"ProcessEvent.{EventType}");
+        activity?.SetTag("event.id", evt.Id);
 
         var existing = await _repository.FindByIdAsync(evt.Id, cancellationToken);
 
@@ -35,7 +37,7 @@ public sealed class DeleteEventHandler : IEventHandler
         {
             _logger.LogWarning(
                 "Delete skipped as orphan no-op: id={Id}, timestamp={Timestamp}",
-                evt.Id, evt.Timestamp);
+                evt.Id, evt.Timestamp ?? "(none)");
             return EventOutcome.Skipped(OrphanDeleteReason);
         }
 

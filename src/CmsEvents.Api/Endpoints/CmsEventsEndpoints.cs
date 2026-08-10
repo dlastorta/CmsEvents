@@ -28,6 +28,8 @@ public static class CmsEventsEndpoints
         {
             var correlationId = ResolveCorrelationId(context);
             var batchId = Guid.NewGuid();
+            // Store batchId in HttpContext so GlobalExceptionHandler can include it in 500 responses.
+            context.Items[Middleware.GlobalExceptionHandler.BatchIdContextItem] = batchId;
             context.Response.Headers["X-Batch-Id"] = batchId.ToString("D", CultureInfo.InvariantCulture);
 
             var result = await mediator.Send(
