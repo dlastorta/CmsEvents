@@ -244,3 +244,17 @@ Companion documents:
 **Design sketch**: Add a lean `EntityReadModel` (or per-endpoint read models) in Infrastructure. `EntityQueries.ListAsync` and `FindByIdAsync` project via `.Select(e => new EntityReadModel { ... })`. Handler `Map` methods rebind to the read model shape. Two implementations of `IEntityQueries` may coexist during migration behind a feature flag if the reader is critical-path.
 
 **Related ADRs**: ADR-010.
+
+---
+
+## 16. Optimistic concurrency for same-id writers
+
+**Context**: `Entity` has no `RowVersion` / `Timestamp` concurrency token. Two producers submitting `publish` for the same new id in the same instant may both read `FindByIdAsync -> null` and both attempt an insert; the second attempt gets a primary-key violation and surfaces as `persistence_error` (correct outcome, but the loser sees a persistence-layer reason for what is logically a race). Same shape applies to concurrent updates against an existing id — the last committed write wins with no detection of the overwrite.
+
+**Why not now**: The spec does not describe concurrent producers, and there is no measured evidence of the pattern in real load. Producers already have to handle non-`processed` outcomes (retry on `processing_timeout`, `persistence_error`, or apply idempotency skip semantics), so the current failure surface is not silently wrong — it is a slightly-noisier presentation of a race that the producer can recover from. The alternative implementation cost (migration + repository + handler retry loop + tests) is real and would be gold-plating today. Documented as an accepted limitation in ADR-005 § Consequences.
+
+**Trigger**: One or more of the following becomes true — (a) telemetry shows a non-trivial rate of `persistence_error` outcomes correlated with concurrent same-id activity; (b) a producer requirement emerges for a distinct outcome that says "another writer beat you"; (c) a use case appears that requires read-modify-write with detection of intervening writes.
+
+**Design sketch**: Add a `RowVersion byte[]` (SQL `rowversion`) column on `Entity`; EF Core `IsRowVersion()` in `EntityConfiguration`. In `EntityRepository.SaveChangesAsync`, catch `DbUpdateConcurrencyException`, re-read the entity, re-evaluate the incoming event against the fresh state via `Entity.EvaluateForApply`/`EvaluateForDelete`, and either re-apply (bounded retry) or fall through to the correct skip/failure outcome. Add an integration test that fires two concurrent `Task.WhenAll` updates against the same id and asserts the winner + the re-read outcome for the loser.
+
+**Related ADRs**: ADR-005, ADR-008, ADR-010.

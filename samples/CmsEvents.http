@@ -18,16 +18,16 @@
 ### and either edit locally (this file is fine to modify without committing) OR
 ### use a .env / .rest-client.env.json for per-developer overrides.
 ###
-### Compute the three Base64 strings:
+### Compute the three Base64 strings (password is a GUID per spec Notes):
 ###
 ###   PowerShell:
-###     $pwd = "YourLocalDevPassword"
+###     $pwd = "4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40"   # replace with YOUR GUID
 ###     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("cms-webhook-user:$pwd"))
 ###     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("readonly-user:$pwd"))
 ###     [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("admin-user:$pwd"))
 ###
 ###   bash / zsh:
-###     PASSWORD="YourLocalDevPassword"
+###     PASSWORD="4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40"   # replace with YOUR GUID
 ###     printf 'cms-webhook-user:%s' "$PASSWORD" | base64
 ###     printf 'readonly-user:%s'    "$PASSWORD" | base64
 ###     printf 'admin-user:%s'       "$PASSWORD" | base64

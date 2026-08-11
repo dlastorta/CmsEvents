@@ -8,7 +8,7 @@ The requests match one-to-one with entries in [`CmsEvents.http`](CmsEvents.http)
 
 - Service running on `http://localhost:5000` per README Quick Start.
 - SQL Server 2022 container from `docker-compose up -d`.
-- Seed users active (`cms-webhook-user`, `readonly-user`, `admin-user`) with the local dev password (`LocalDevPassword-1!` in examples below — replace with yours if different).
+- Seed users active (`cms-webhook-user`, `readonly-user`, `admin-user`) with the local dev password (`4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40` in examples below — replace with yours if different).
 
 ## Verifying DB state with sqlcmd
 
@@ -40,7 +40,7 @@ Then just `sql "SELECT * FROM Entities"` (or `samples\sql.bat "..."` in CMD).
 Request:
 
 ```bash
-curl -u "cms-webhook-user:LocalDevPassword-1!" -H "Content-Type: application/json" -X POST http://localhost:5000/cms/events -d "[{\"type\":\"publish\",\"id\":\"article-1\",\"version\":1,\"timestamp\":\"2026-08-01T10:00:00Z\",\"payload\":{\"title\":\"Hello world\",\"body\":\"First version\"}}]"
+curl -u "cms-webhook-user:4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40" -H "Content-Type: application/json" -X POST http://localhost:5000/cms/events -d "[{\"type\":\"publish\",\"id\":\"article-1\",\"version\":1,\"timestamp\":\"2026-08-01T10:00:00Z\",\"payload\":{\"title\":\"Hello world\",\"body\":\"First version\"}}]"
 ```
 
 Expected response (status `200`):
@@ -240,7 +240,7 @@ POST as `readonly-user` (User role, not Organization). Expected: `403 Forbidden`
 ## Scenario 12 — List entities as normal user
 
 ```bash
-curl -u "readonly-user:LocalDevPassword-1!" http://localhost:5000/entities
+curl -u "readonly-user:4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40" http://localhost:5000/entities
 ```
 
 Expected: only entities matching `Status=Published AND IsDisabled=false`. `article-mixed-a` should be present. `article-never-seen` (Unpublished) should NOT be present.
@@ -265,7 +265,7 @@ Same URL, `admin-user` credentials. Expected: **all** entities, including Unpubl
 Disable `article-mixed-a`:
 
 ```bash
-curl -u "admin-user:LocalDevPassword-1!" -X POST http://localhost:5000/entities/article-mixed-a/disable
+curl -u "admin-user:4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40" -X POST http://localhost:5000/entities/article-mixed-a/disable
 ```
 
 Expected: `200 OK` with `{ "id": "article-mixed-a", "isDisabled": true }`.
@@ -313,7 +313,7 @@ Expected: `Published`, `IsDisabled=1`, `LastProcessedVersion=2`. Normal user sti
 ## Scenario 20 — Admin re-enables
 
 ```bash
-curl -u "admin-user:LocalDevPassword-1!" -X POST http://localhost:5000/entities/article-mixed-a/enable
+curl -u "admin-user:4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40" -X POST http://localhost:5000/entities/article-mixed-a/enable
 ```
 
 Expected: `200` with `{ "isDisabled": false }`.

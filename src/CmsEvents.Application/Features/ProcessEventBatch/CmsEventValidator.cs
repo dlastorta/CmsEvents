@@ -25,6 +25,14 @@ public sealed class CmsEventValidator : AbstractValidator<CmsEventEnvelope>
     /// </summary>
     public const int MaxPayloadBytes = 64 * 1024; // 64 KiB
 
+    /// <summary>
+    /// Hard cap on the length of an event Id, matching the <c>Entity.Id</c> column length
+    /// (see <c>EntityConfiguration.HasMaxLength(256)</c>). Without this rule an oversized id
+    /// would pass validation and fail at persistence as a SQL truncation error (surface as
+    /// <c>persistence_error</c>), which is misleading — the fault is bad input, not the DB.
+    /// </summary>
+    public const int MaxIdLength = 256;
+
     public CmsEventValidator()
     {
         RuleFor(e => e.Type)
@@ -34,12 +42,14 @@ public sealed class CmsEventValidator : AbstractValidator<CmsEventEnvelope>
 
         RuleFor(e => e.Id)
             .NotEmpty()
-            .WithMessage("Id must be non-empty.");
+            .WithMessage("Id must be non-empty.")
+            .MaximumLength(MaxIdLength)
+            .WithMessage($"Id must not exceed {MaxIdLength} characters.");
 
         RuleFor(e => e.Timestamp)
             .NotEmpty()
-            .Must(BeValidIso8601Utc)
-            .WithMessage("Timestamp must be a valid ISO 8601 UTC value (e.g., \"2026-08-01T10:00:00Z\").");
+            .Must(BeValidIso8601)
+            .WithMessage("Timestamp must be a valid ISO 8601 date/time (e.g., \"2026-08-01T10:00:00Z\" or \"2026-08-01T12:00:00+02:00\"). Values with an explicit offset are normalized to UTC before comparison.");
 
         // Version required for publish/unPublish; must be >= 1.
         RuleFor(e => e.Version)
@@ -72,7 +82,14 @@ public sealed class CmsEventValidator : AbstractValidator<CmsEventEnvelope>
             .WithMessage($"Payload exceeds the maximum allowed size of {MaxPayloadBytes} bytes.");
     }
 
-    private static bool BeValidIso8601Utc(string? value) =>
+    /// <summary>
+    /// Accepts any ISO 8601 date/time. Values with an explicit offset (e.g. <c>+02:00</c>) are
+    /// normalized to UTC by <c>AdjustToUniversal</c>; values with no offset are treated as UTC
+    /// by <c>AssumeUniversal</c>. The Trade-off is documented in ADR-005: we accept-and-normalize
+    /// rather than reject non-UTC because typo tolerance beats strictness at a webhook boundary,
+    /// and the normalization is deterministic.
+    /// </summary>
+    private static bool BeValidIso8601(string? value) =>
         !string.IsNullOrEmpty(value) &&
         DateTime.TryParse(
             value,

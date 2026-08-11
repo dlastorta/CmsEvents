@@ -119,6 +119,61 @@ public sealed class CmsEventValidatorTests
     }
 
     [Fact]
+    public void Validate_IdAtMaxLength_IsValid()
+    {
+        // Boundary — an id of exactly MaxIdLength must pass, mirroring the DB column size.
+        var evt = new CmsEventEnvelope
+        {
+            Type = CmsEventType.Delete,
+            Id = new string('a', CmsEventValidator.MaxIdLength),
+            Timestamp = ValidTimestamp,
+        };
+
+        _sut.Validate(evt).IsValid.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_IdExceedingMaxLength_IsInvalid()
+    {
+        // One char over the cap → validation_error (not a persistence_error at SQL layer,
+        // which would misclassify a bad-input bug as a data-store fault).
+        var evt = new CmsEventEnvelope
+        {
+            Type = CmsEventType.Delete,
+            Id = new string('a', CmsEventValidator.MaxIdLength + 1),
+            Timestamp = ValidTimestamp,
+        };
+
+        var result = _sut.Validate(evt);
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e =>
+            e.PropertyName == nameof(CmsEventEnvelope.Id) &&
+            e.ErrorMessage.Contains("must not exceed", System.StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Theory]
+    [InlineData("2026-08-01T10:00:00Z")]           // explicit UTC (Z)
+    [InlineData("2026-08-01T10:00:00+00:00")]      // explicit zero offset
+    [InlineData("2026-08-01T12:00:00+02:00")]      // positive offset — normalized to UTC
+    [InlineData("2026-08-01T05:00:00-05:00")]      // negative offset — normalized to UTC
+    [InlineData("2026-08-01T10:00:00")]            // no offset — assumed UTC per validator note
+    public void Validate_TimestampWithVariousOffsets_IsAccepted_PerAcceptAndNormalizePolicy(string timestamp)
+    {
+        // ADR-005: we accept-and-normalize non-Z offsets rather than reject, and the validator
+        // message advertises that explicitly. This test locks in that contract so a future change
+        // to "strict Z only" is a conscious decision, not accidental drift.
+        var evt = new CmsEventEnvelope
+        {
+            Type = CmsEventType.Delete,
+            Id = "id-1",
+            Timestamp = timestamp,
+        };
+
+        _sut.Validate(evt).IsValid.Should().BeTrue($"timestamp '{timestamp}' should be accepted per ADR-005");
+    }
+
+    [Fact]
     public void Validate_DeleteWithVersion_IsInvalid()
     {
         // Delete carries no version concept — a stray version field signals a malformed

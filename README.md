@@ -105,15 +105,15 @@ dotnet user-secrets set "ConnectionStrings:Reader" "Server=localhost,1433;Databa
 
 ### Step 5: Generate a BCrypt hash for the seed users
 
-Working directory: **`CmsEvents/`**. Pick a local dev password (any string). This command hashes it and prints the result to stdout:
+Working directory: **`CmsEvents/`**. Per the spec Notes ("password is a GUID or GUID-like random string"), pick a random GUID as your dev password. The example below uses `4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40`; generate your own with `[Guid]::NewGuid()` (PowerShell) or `uuidgen` (bash). This command hashes it and prints the result to stdout:
 
 ```bash
-dotnet run --project tools/BcryptHash -- --password "LocalDevPassword-1!"
+dotnet run --project tools/BcryptHash -- --password "4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40"
 ```
 
 Expected output: a single line starting with `$2a$11$` (60 chars). **Copy this hash** — you will paste it three times in the next step.
 
-For local dev we use the same hash (and therefore the same password) for all three seed users. In production, each user has its own password per the rotation runbook.
+For local dev we use the same hash (and therefore the same password) for all three seed users, per the spec's "3 users" wording. In production, each user has its own password per the rotation runbook (`docs/runbook-secret-rotation.md`).
 
 ### Step 6: Register the three seed users
 
@@ -182,14 +182,16 @@ Leave this terminal open — the service runs in the foreground.
 Open a **new terminal** (leave Step 8 running). Working directory can be anywhere — this is a network call.
 
 ```bash
-curl -u "cms-webhook-user:LocalDevPassword-1!" -H "Content-Type: application/json" -X POST http://localhost:5000/cms/events -d "[]"
+curl -u "cms-webhook-user:4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40" -H "Content-Type: application/json" -X POST http://localhost:5000/cms/events -d "[]"
 ```
 
 Note for PowerShell users: PowerShell aliases `curl` to `Invoke-WebRequest`, which has different arguments. Use `curl.exe` explicitly, or install a real `curl` (Windows 10+ ships one at `C:\Windows\System32\curl.exe`):
 
 ```powershell
-curl.exe -u "cms-webhook-user:LocalDevPassword-1!" -H "Content-Type: application/json" -X POST http://localhost:5000/cms/events -d "[]"
+curl.exe -u "cms-webhook-user:4d2f8c9a-1b3e-4f5d-8a7c-9e6f2b3c1d40" -H "Content-Type: application/json" -X POST http://localhost:5000/cms/events -d "[]"
 ```
+
+**Replace the GUID above with the one you chose in Step 5.** The password is GUID-format per the spec Notes; using a human-readable password like `LocalDevPassword-1!` would technically work but does not satisfy the spec's stated requirement.
 
 Expected response:
 

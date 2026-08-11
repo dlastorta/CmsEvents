@@ -15,7 +15,7 @@ Numbers reflect the merged report from `dotnet test --collect:"XPlat Code Covera
 
 - **Round 1** (initial): 79% line / 67% branch — snapshot after removing stale coverage files from previous builds.
 - **Round 2**: 85% line / 72% branch — after applying:
-  - `ProcessingOptions` instantiated via `configuration.Get<T>()` (was 0% because the class was never constructed, only used to name a config key).
+  - Wired `ProcessingOptions` to `AddRequestTimeouts` in `Program.cs` — the class existed and named a config section but nothing read the value, so the 60-second timeout ADR-009 requires was effectively not enforced. This was a real drift fix (see verification-report.md § Cycle log #2); its coverage improvement was a side effect of the wiring, not the reason for the change.
   - 11 new integration tests covering `GET /entities`, `GET /entities/{id}`, `POST /disable`, `POST /enable` (previously only `POST /cms/events` was integration-tested).
 - **Round 3** (post-review): additional tests added in response to the external code review — invalid-credential auth paths, `SqlExceptionClassifier` unit matrix, `EvaluateForDelete` branches, validator boundary tests (delete-with-version, payload size cap). Fresh numbers were not captured before this note was written; re-run `dotnet test --collect:"XPlat Code Coverage"` locally for the current figures. The new tests raise line + branch coverage, they do not lower it.
 

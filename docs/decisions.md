@@ -341,6 +341,8 @@ Rule applies uniformly across `publish` and `unPublish` (see ADR-006 for orphan-
 - Skips and warnings are logged, not silent — observability (ADR-014) surfaces both as anomaly signals.
 - Sustained producer clock skew > 24h relative to UTC generates warning noise; if observed, iterate to hard rejection.
 - Hard-delete precludes idempotent retry of delete-then-publish sequences. Retries of a delete after processing are safe (target already gone); retries of a publish after processing pass this rule normally; but a publish arriving after a delete for the same ID is indistinguishable from a legitimate new entity. Acceptable per spec requirement.
+- **Concurrent same-id writers are not serialized at the domain layer.** Two producers submitting `publish` for the same new id in the same instant may both read `FindByIdAsync -> null`, both attempt an insert, and the second one fails with a `persistence_error` when SQL Server surfaces the primary-key violation. This is the correct outcome under the current design — the batch continues, no data corruption, no HTTP 500 — but it produces a `persistence_error` for the loser instead of a cleaner `duplicate` skip. The alternative (adding a `RowVersion` column + a re-read retry loop) was considered and deferred: the spec does not describe concurrent producers, we have no evidence of the pattern under real load, and the producer already has to handle retry on any non-processed outcome. Documented as `future-improvements.md` #16 with the trigger conditions. The current behavior is captured end-to-end by `CmsEventsEndpointTests.Post_ConcurrentPublishesForSameNewId_ResolveGracefully_ExactlyOneEntityPersists`.
+- **A higher-version event with an earlier timestamp overwrites `LastProcessedTimestamp`.** Consequence of "version is CMS truth; timestamp is only a tie-breaker within the same version": when a higher-version event applies, its timestamp becomes the new `LastProcessedTimestamp` even if it is earlier than the stored value. This can then make a subsequent `delete` with a "mid-range" timestamp appear strictly newer than the stored state, and it will apply. This is intentional — the alternative (persisting `MAX(stored, incoming)` on the timestamp field) would decouple the field from its "when did this event happen" semantics and complicate reasoning without solving a spec-defined problem. If future evidence shows CMS sending a mix of high-version-old-timestamp and mid-timestamp deletes for the same id, revisit with either (a) an explicit `LastKnownActivityTimestamp` field separate from event-time, or (b) requiring producer to guarantee monotonic timestamp within an id. Behavior locked in by `EntityIdempotencyTests.EvaluateForApply_HigherVersion_EarlierTimestamp_AppliesAndRewindsTimestamp`.
 
 ### Related ADRs
 
@@ -780,7 +782,7 @@ Three users seeded at startup from configuration (BCrypt hashes; from Azure Key 
 - `readonly-user` → User
 - `admin-user` → Admin
 
-Usernames 10-20 chars per spec. Seed runs only if the Users table is empty (idempotent).
+Usernames 10-20 chars per spec. `UserSeeder.SeedAsync` runs at every startup and is idempotent — it inserts any missing seed user and updates the stored `PasswordHash` when the configured hash has drifted (so rotating a hash in User Secrets or Key Vault propagates on the next restart without a manual DB step).
 
 #### Authentication middleware
 
@@ -950,7 +952,7 @@ Different endpoints have different expected traffic profiles and require distinc
 
 **Algorithm**: Sliding window per limiter. Sliding window smooths bursts better than fixed window while remaining simple to reason about.
 
-**Partition key**: authenticated username. Each user has an independent bucket. Falls back to client IP for unauthenticated requests (edge case — auth middleware rejects unauthenticated before rate limit sees them).
+**Partition key**: `user:{username}:{path}` for authenticated requests — each authenticated user has an independent bucket **per request path**, so a burst on `/cms/events` does not exhaust the user's ability to query `/entities`. Falls back to `ip:{remote}` for unauthenticated requests (edge case — auth middleware rejects unauthenticated before rate limit sees them). The literal-path granularity is more permissive than a route-pattern grouping would be (see § Trade-offs); refining is deferred to `future-improvements.md`.
 
 **Per-endpoint limits** (starting values, expected to tune with real usage):
 

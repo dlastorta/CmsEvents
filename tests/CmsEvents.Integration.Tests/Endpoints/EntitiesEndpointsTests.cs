@@ -164,6 +164,85 @@ public sealed class EntitiesEndpointsTests
     }
 
     [Fact]
+    public async Task Disable_AsCmsWebhookRole_ReturnsForbidden()
+    {
+        // Admin endpoints are AdminOnly per ADR-011 — even the CMS-webhook role cannot
+        // toggle IsDisabled. Locks in the AdminOnly policy on admin actions.
+        using var webhookClient = _factory.CreateClientAsCmsWebhook();
+        var response = await webhookClient.PostAsync($"/entities/any-id/disable", content: null);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Enable_AsReadonlyUser_ReturnsForbidden()
+    {
+        using var readonlyClient = _factory.CreateClientAsReadonlyUser();
+        var response = await readonlyClient.PostAsync($"/entities/any-id/enable", content: null);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task Enable_AsCmsWebhookRole_ReturnsForbidden()
+    {
+        using var webhookClient = _factory.CreateClientAsCmsWebhook();
+        var response = await webhookClient.PostAsync($"/entities/any-id/enable", content: null);
+        response.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+    }
+
+    [Fact]
+    public async Task AdminDisable_ThenCmsPublish_ForSameId_PreservesIsDisabled_EndToEnd()
+    {
+        // AC6 sticky end-to-end: admin flips IsDisabled=true, then the CMS republishes the entity
+        // via the real event pipeline. IsDisabled must survive — the CMS handler must not touch it.
+        // Unit test EntityIdempotencyTests.ApplyPublish_DoesNotTouch_IsDisabled locks this at the
+        // Domain level; this test proves the same invariant through HTTP + real SQL.
+        var run = UniqueRunId();
+        await SeedEntitiesAsync(run);
+        var id = $"published-{run}";
+
+        using var adminClient = _factory.CreateClientAsAdmin();
+        using var webhookClient = _factory.CreateClientAsCmsWebhook();
+        using var readonlyClient = _factory.CreateClientAsReadonlyUser();
+
+        // Admin disables.
+        (await adminClient.PostAsync($"/entities/{id}/disable", content: null))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        // Readonly user cannot see it anymore.
+        (await readonlyClient.GetAsync($"/entities/{id}"))
+            .StatusCode.Should().Be(HttpStatusCode.NotFound, "readonly view honors IsDisabled");
+
+        // CMS republishes (higher version to force the apply branch).
+        var republish = new[]
+        {
+            new CmsEventEnvelope
+            {
+                Type = CmsEventType.Publish,
+                Id = id,
+                Version = 2,
+                Timestamp = "2026-08-01T11:00:00Z",
+                Payload = JsonDocument.Parse("{\"title\":\"republished\"}").RootElement,
+            },
+        };
+        var republishResp = await webhookClient.PostAsJsonAsync("/cms/events", republish);
+        republishResp.EnsureSuccessStatusCode();
+        var republishBody = await republishResp.Content.ReadFromJsonAsync<BatchResponse>();
+        republishBody!.Processed.Should().Be(1);
+
+        // IsDisabled must STILL be true — the CMS publish did not override the admin decision.
+        var adminGet = await adminClient.GetAsync($"/entities/{id}");
+        adminGet.StatusCode.Should().Be(HttpStatusCode.OK);
+        var entity = await adminGet.Content.ReadFromJsonAsync<EntityResponse>();
+        entity!.IsDisabled.Should().BeTrue("admin disable must survive a subsequent CMS publish (AC6)");
+        entity.Version.Should().Be(2, "the publish did apply — version advanced — but IsDisabled stayed");
+
+        // Readonly still cannot see it — the disable overrides published status per ADR-007.
+        (await readonlyClient.GetAsync($"/entities/{id}"))
+            .StatusCode.Should().Be(HttpStatusCode.NotFound,
+                "post-publish, IsDisabled is still true, so readonly view still filters it out");
+    }
+
+    [Fact]
     public async Task Disable_AsReadonlyUser_ReturnsForbidden()
     {
         var run = UniqueRunId();

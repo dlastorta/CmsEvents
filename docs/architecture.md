@@ -376,7 +376,7 @@ dotnet ef database update \
 
 ### Seed data
 
-The `Users` table (per ADR-011) is seeded at startup with three users (`cms-webhook-user`, `readonly-user`, `admin-user`) from configuration. Seeding is idempotent — it runs only when the table is empty. Passwords are BCrypt-hashed values sourced from User Secrets (local dev) or Azure Key Vault (production).
+The `Users` table (per ADR-011) is seeded at startup with three users (`cms-webhook-user`, `readonly-user`, `admin-user`) from configuration. `UserSeeder.SeedAsync` runs at every startup and is idempotent — it inserts any user that is missing from the table and updates the password hash for any user whose configured hash has drifted from what's stored (so rotating a hash in User Secrets or Key Vault propagates on the next restart without a manual DB step). Passwords are BCrypt-hashed values sourced from User Secrets (local dev) or Azure Key Vault (production).
 
 ### Docker
 

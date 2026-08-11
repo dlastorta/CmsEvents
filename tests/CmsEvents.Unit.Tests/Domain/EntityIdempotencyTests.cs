@@ -24,6 +24,30 @@ public sealed class EntityIdempotencyTests
     }
 
     [Fact]
+    public void EvaluateForApply_HigherVersion_EarlierTimestamp_AppliesAndRewindsTimestamp()
+    {
+        // ADR-005 § Consequences: version is CMS truth; timestamp is only a tie-breaker within
+        // the same version. When a higher-version event applies, its timestamp becomes the new
+        // LastProcessedTimestamp even if it is earlier than the stored value. This test locks in
+        // the intentional "rewind" so any future change to a MAX(stored, incoming) semantics is
+        // a conscious decision, not accidental drift.
+        var stored = Entity.CreateFromPublish("id-1", version: 5, timestamp: Now.AddHours(1), payload: "{}", now: Now.AddHours(1));
+
+        // Higher version, but a strictly earlier timestamp.
+        var decision = stored.EvaluateForApply(incomingVersion: 6, incomingTimestamp: Now);
+
+        decision.Outcome.Should().Be(IdempotencyOutcome.Apply);
+
+        // Simulate the handler applying the event; verify the timestamp rewinds.
+        stored.ApplyPublish(version: 6, timestamp: Now, payload: "{\"v\":6}", now: Now);
+        stored.LastProcessedVersion.Should().Be(6);
+        stored.LastProcessedTimestamp.Should().Be(Now,
+            "version is the ordering signal; timestamp adopts the applied event's value even when earlier");
+        stored.LastProcessedTimestamp.Should().BeBefore(Now.AddHours(1),
+            "the previous timestamp (Now + 1h) has been overwritten by the new event's earlier timestamp");
+    }
+
+    [Fact]
     public void EvaluateForApply_LowerVersion_ReturnsSkipSuperseded()
     {
         var entity = Entity.CreateFromPublish("id-1", version: 5, timestamp: Now, payload: "{}", now: Now);
