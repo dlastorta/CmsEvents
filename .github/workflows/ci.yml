@@ -31,7 +31,7 @@ jobs:
       - name: Build
         run: dotnet build CmsEvents.sln --configuration Release --no-restore
 
-      # Unit + Architecture tests use SQLite in-memory / no external deps
+      # Unit + Architecture tests use Moq for repository ports; no external deps (no DB, no Docker)
       - name: Unit tests
         run: |
           dotnet test tests/CmsEvents.Unit.Tests/CmsEvents.Unit.Tests.csproj \

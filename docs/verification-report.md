@@ -132,7 +132,7 @@ The verification is a **cycle**, not a single pass. When code and ADR disagree, 
 ### ADR-016 — Testing Strategy — CONFORMS
 
 - Three test projects: `Unit.Tests`, `Integration.Tests`, `Architecture.Tests`.
-- Correct tooling per tier: SQLite in Unit; Testcontainers.MsSql in Integration; NetArchTest in Architecture.
+- Correct tooling per tier: Moq for repository ports in Unit (no DB provider); Testcontainers.MsSql for real SQL Server in Integration; NetArchTest in Architecture.
 - CI (`.github/workflows/ci.yml`) runs all three tiers.
 - xUnit + Moq + FluentAssertions.
 - Coverage: 85% line / 72% branch as of Round 2 (see `coverage-notes.md`); Round 3 tests (invalid-auth matrix, `SqlExceptionClassifier`, `EvaluateForDelete`, validator boundary cases) were added after that capture — re-run coverage locally for post-fix figures.

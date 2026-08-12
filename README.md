@@ -228,7 +228,7 @@ docker compose down -v
 Three tiers per ADR-016:
 
 ```bash
-# Unit tests (fast, in-process SQLite)
+# Unit tests (fast, in-process — Moq for repository ports, no DB provider needed)
 dotnet test tests/CmsEvents.Unit.Tests
 
 # Architecture tests (NetArchTest — no DB needed)
