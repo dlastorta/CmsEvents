@@ -19,7 +19,6 @@
     <PackageReference Include="xunit.runner.visualstudio" />
     <PackageReference Include="Moq" />
     <PackageReference Include="FluentAssertions" />
-    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="coverlet.collector" />
   </ItemGroup>
 

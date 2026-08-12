@@ -380,10 +380,6 @@ The `Users` table (per ADR-011) is seeded at startup with three users (`cms-webh
 
 ### Docker
 
-The service ships with a `docker-compose.yml` for local development that starts:
+The service ships with a `docker-compose.yml` for local development that starts **SQL Server 2022** as a single container (mirrors production DB engine). The Api itself runs via `dotnet run` from `src/CmsEvents.Api/` — no Api container in the compose file — because the fast dev loop wants hot-reload + break-into-debugger, not a rebuild-image-per-change cycle.
 
-- CmsEvents.Api container.
-- SQL Server 2022 container (mirrors production DB engine).
-- Optional: Azurite for future Blob/Queue emulation if needed.
-
-Production deployment uses the same Dockerfile; the compose file is for local convenience only.
+Production deployment uses the same `Dockerfile` (present in the Api project) to build a service image; the compose file is for local dependency convenience only, not for shipping the Api. Integration tests spin up their own SQL Server container via Testcontainers independently of `docker-compose`.

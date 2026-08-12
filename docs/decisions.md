@@ -245,17 +245,17 @@ Files under `Application/EventProcessing/`, sibling to `Features/` (per ADR-003 
 
 **Positive**:
 
-- Open/Closed: new event type = new handler + DI registration, no changes to dispatcher or existing handlers.
+- Open/Closed within the dispatcher: existing handlers and the dispatcher itself do not change when a new event type is added.
 - Single Responsibility per handler; testable in isolation.
 - DI-clean: each handler injects only its specific dependencies.
 - Complements MediatR without conflict at a distinct layer of abstraction.
 
 **Trade-offs**:
 
-- More files (1 interface + 1 dispatcher + N handlers).
+- More files (1 interface + 1 dispatcher + N handlers) than a switch expression would produce for 3 types.
 - Slight indirection when tracing execution.
-- DI registration discipline required; missing registration fails at dispatch time (mitigated via assembly scanning + integration tests).
 - Two dispatch mechanisms coexist (MediatR + Strategy); requires clear documentation of applicability (this ADR + ADR-003).
+- **The "just add a handler + DI" framing understates the actual change footprint for a new event type.** In practice, adding a fourth type also touches: `CmsEventType` constants (`Contracts/Events/CmsEventType.cs`), `CmsEventValidator` rules for the new type's field requirements (`Application/Features/ProcessEventBatch/CmsEventValidator.cs`), any per-type response semantics in `EventOutcome` reasons if new skip/failure cases apply, the handler's unit tests, and at least one integration test proving end-to-end behavior. The dispatcher stays untouched — that part of the Open/Closed claim holds — but the total change is closer to 5-8 file edits than to 2. This is honest scope for a real reviewer.
 
 ### Related ADRs
 
@@ -1168,7 +1168,7 @@ Spec item 7 requires testing how events are processed, ingestion constraints are
 
 **Testing pyramid** with three tiers.
 
-**Unit tests** (xUnit + Moq + FluentAssertions, SQLite in-memory DbContext): handlers (MediatR commands/queries), domain logic (idempotency rule per ADR-005, status transitions), validators (FluentValidation per ADR-008), Strategy handlers per event type (ADR-004).
+**Unit tests** (xUnit + Moq + FluentAssertions): domain logic (idempotency rule per ADR-005, status transitions on `Entity`, `User` invariants), validators (`CmsEventValidator` per ADR-008), Strategy handlers per event type (ADR-004), `EventDispatcher`, `SqlExceptionClassifier`. No `DbContext` at this tier — repository interfaces are mocked; anything that needs a real DB (SQL Server dialect, EF Core translations, migrations, constraints) belongs to the integration tier below to avoid the "passes on a fake, fails on the real one" trap.
 
 **Integration tests** (xUnit + `WebApplicationFactory` + TestContainers with SQL Server): full HTTP flow for `/cms/events` and `/entities/*`; Basic Auth end-to-end with valid/invalid credentials (spec item 7); rate limiting behavior (ADR-013); batch outcomes (processed/skipped/failed counts, response schema per ADR-008); admin flag interactions (four `Status × IsDisabled` combinations, CMS re-publish of disabled entity, idempotent disable/enable per ADR-007).
 
@@ -1189,7 +1189,7 @@ tests/
 
 ### Alternatives Considered
 
-- **EF Core InMemory provider instead of SQLite**: rejected — LINQ translation differs from real provider; passes tests that fail against SQL Server (per ADR-010 rationale).
+- **EF Core InMemory or SQLite provider at the unit tier**: rejected — LINQ translation differs from SQL Server; a fake provider passes tests that fail against production (see ADR-010 § Alternatives). Repository interfaces are mocked at the unit tier; DB-touching behavior is exercised end-to-end against real SQL Server via TestContainers in the integration tier. The redundancy of both a fake-provider unit test and a real-DB integration test for the same DB behavior was judged to be gold-plating for this scope.
 - **Manual QA only**: rejected — spec requires automated tests.
 - **End-to-end tests with staged environment**: rejected — infrastructure overhead; TestContainers covers integration adequately.
 - **NUnit or MSTest**: viable alternatives; xUnit chosen for modern .NET convention and better parallelism model.
@@ -1209,7 +1209,7 @@ tests/
 **Trade-offs**:
 
 - TestContainers adds ~10s per integration test class startup (Docker container spin-up). Mitigation: xUnit collection fixtures for container reuse.
-- SQLite has SQL Server dialect gaps (some LOB types, `MERGE` statement); mitigation: reserve those tests for integration tier where TestContainers uses real SQL Server.
+- The unit tier cannot catch SQL-Server-specific behavior (constraint violations, `ISJSON` check, JSON column semantics, migrations). Integration tier via TestContainers with real SQL Server is where that lives. A misclassified test at the unit tier that appears to cover DB behavior would be actively misleading — see the discussion of misclassified mock-based DB tests in `coverage-notes.md`.
 - Coverage as heuristic requires code review discipline to catch under-tested paths.
 
 ### Related ADRs
@@ -1217,5 +1217,5 @@ tests/
 - ADR-002 (Boundary Tests) — architecture test tier.
 - ADR-003 (Vertical Slice) — test project layout mirrors production.
 - ADR-005, ADR-006, ADR-007, ADR-008 — specific test scenarios per ADR.
-- ADR-010 (Reader/Writer DbContext) — SQLite for unit, TestContainers for integration.
+- ADR-010 (Reader/Writer DbContext) — TestContainers with real SQL Server at the integration tier; unit tier does not touch a DbContext.
 - ADR-011 (Basic Authentication) — auth coverage per spec item 7.

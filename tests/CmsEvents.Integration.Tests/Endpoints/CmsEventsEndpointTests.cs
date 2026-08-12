@@ -224,6 +224,51 @@ public sealed class CmsEventsEndpointTests
     }
 
     [Fact]
+    public async Task Post_OrphanUnPublish_ForNeverSeenId_UpsertsAsUnpublished_HiddenFromReadonly_VisibleToAdmin()
+    {
+        // Spec corner case (item 3): an entity can be modified (v X -> X+1) and then unpublished
+        // before we ever saw a publish for it. Explicit contract at HTTP + real SQL: the row is
+        // created with Status=Unpublished from the event's own version/timestamp/payload, is
+        // hidden from a readonly user, and is visible to an admin. Unit-tested at the handler
+        // level; this test locks the same invariant end-to-end.
+        using var webhookClient = _factory.CreateClientAsCmsWebhook();
+        var id = "orphan-unpublish-" + Guid.NewGuid().ToString("N")[..8];
+
+        var events = new[]
+        {
+            new CmsEventEnvelope
+            {
+                Type = CmsEventType.UnPublish,
+                Id = id,
+                Version = 7, // spec's "X+1" — the CMS is already at v7 when we first hear about it
+                Timestamp = NowIso,
+                Payload = JsonDocument.Parse("{\"title\":\"orphan-unpub-body\"}").RootElement,
+            },
+        };
+
+        var response = await webhookClient.PostAsJsonAsync("/cms/events", events);
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadFromJsonAsync<BatchResponse>();
+        body!.Processed.Should().Be(1, "orphan unpublish upserts — it is not a failure");
+        body.Failed.Should().Be(0);
+
+        // Readonly user must NOT see it — Status=Unpublished is filtered by IEntityQueries.
+        using var readonlyClient = _factory.CreateClientAsReadonlyUser();
+        (await readonlyClient.GetAsync($"/entities/{id}")).StatusCode
+            .Should().Be(HttpStatusCode.NotFound, "readonly view filters out non-published entities");
+
+        // Admin must see it, and the row must carry the event's own version/payload (not defaults).
+        using var adminClient = _factory.CreateClientAsAdmin();
+        var adminGet = await adminClient.GetAsync($"/entities/{id}");
+        adminGet.StatusCode.Should().Be(HttpStatusCode.OK);
+        var entity = await adminGet.Content.ReadFromJsonAsync<EntityResponse>();
+        entity!.Id.Should().Be(id);
+        entity.Version.Should().Be(7, "the CMS-authoritative version is preserved even on first observation");
+        entity.Status.Should().Be("Unpublished", "orphan unpublish upserts with Unpublished status");
+        entity.IsDisabled.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task Post_DeleteForUnknownEntity_IsCountedAsSkipped_NotAsError()
     {
         using var client = _factory.CreateClientAsCmsWebhook();

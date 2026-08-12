@@ -7,6 +7,7 @@ using CmsEvents.Application.Features.ProcessEventBatch;
 using CmsEvents.Contracts.Events;
 using CmsEvents.Contracts.Responses;
 using MediatR;
+using Serilog.Context;
 
 /// <summary>
 /// Endpoint group for POST /cms/events per spec item 1.
@@ -32,11 +33,18 @@ public static class CmsEventsEndpoints
             context.Items[Middleware.GlobalExceptionHandler.BatchIdContextItem] = batchId;
             context.Response.Headers["X-Batch-Id"] = batchId.ToString("D", CultureInfo.InvariantCulture);
 
-            var result = await mediator.Send(
-                new ProcessEventBatchCommand(events, correlationId, batchId),
-                cancellationToken);
+            // Push BatchId into the Serilog LogContext so every log emitted during batch processing
+            // (in the handler, validator, dispatcher, per-event handlers, repository) carries it —
+            // per ADR-014. CorrelationId is pushed globally by CorrelationIdMiddleware; BatchId is
+            // scoped here because it only exists for /cms/events requests.
+            using (LogContext.PushProperty("BatchId", batchId))
+            {
+                var result = await mediator.Send(
+                    new ProcessEventBatchCommand(events, correlationId, batchId),
+                    cancellationToken);
 
-            return Results.Ok(result);
+                return Results.Ok(result);
+            }
         })
         .WithName("ProcessEventBatch")
         .Produces<BatchResponse>(StatusCodes.Status200OK)
