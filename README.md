@@ -79,6 +79,8 @@ Expected: one row for `cmsevents-sqlserver`, `STATUS` should say `Up ... (health
 
 If Docker is not running, you will see an error like `Cannot connect to the Docker daemon` — start Docker Desktop and retry.
 
+**Apple Silicon note (M1 / M2 / M3 / M4):** the SQL Server 2022 image is x86-64 only. `docker-compose.yml` pins `platform: linux/amd64` so Docker Desktop runs it under Rosetta 2 emulation on ARM Macs. Verify Rosetta 2 is enabled in Docker Desktop → Settings → General → "Use Rosetta for x86/amd64 emulation on Apple Silicon" — this is the default in current Docker Desktop versions. Expect ~20-40% CPU overhead vs a native ARM image; adequate for dev + tests.
+
 ### Step 3: Initialize User Secrets (optional — usually a no-op)
 
 Working directory: **`CmsEvents/`**.

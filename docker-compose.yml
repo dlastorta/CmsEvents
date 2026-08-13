@@ -13,6 +13,12 @@ services:
 
   sqlserver:
     image: mcr.microsoft.com/mssql/server:2022-latest
+    # The SQL Server image is x86-64 only. On Apple Silicon (M1/M2/M3), Docker
+    # Desktop runs it under Rosetta 2 emulation — this line makes that explicit
+    # so ARM Macs don't surface a "no matching manifest for linux/arm64" warning
+    # or fall back to unpredictable behavior. On Intel Mac / Linux / Windows this
+    # line is a no-op (host is already amd64).
+    platform: linux/amd64
     container_name: cmsevents-sqlserver
     hostname: cmsevents-sqlserver
     environment:
