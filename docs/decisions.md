@@ -536,11 +536,15 @@ Failure classification:
 - `timestamp` — valid ISO 8601 UTC.
 - `payload` — non-null JSON object for `publish`/`unPublish`; absent for `delete`. Internal structure opaque per spec.
 
+**Wire format assumption** (spec is silent — explicit here):
+
+The spec references a `payload` field on `publish`/`unPublish` events without specifying the wire format of the webhook request body. We assume the request body is `application/json` because (a) it is the ubiquitous default for CMS webhook contracts, (b) it lets the `payload` field carry any valid JSON value (object, array, primitive, or `null`) without additional serialization ceremony inside the batch envelope, and (c) it enables the DB-level `ISJSON` check constraint on the `Payload` column as defense in depth. If the CMS later requires a different wire format, the swap is contained: `[FromBody]` binding on the `POST /cms/events` endpoint + the column type on `EntityConfiguration.Payload`; the rest of the pipeline (validator, dispatcher, handlers, storage) is agnostic to the payload's specific shape as long as its byte length is bounded.
+
 **Payload sanitization** (per spec item 2 — "validated and sanitized"):
 
 - Structural sanitization is enforced by the JSON deserializer at the transport boundary: malformed JSON never reaches the validator; the payload is exposed as a `JsonElement` and cannot carry non-JSON content.
 - **Size cap**: payload UTF-8 byte length must be `<= 64 KiB` (`CmsEventValidator.MaxPayloadBytes`). Chosen an order of magnitude above any realistic CMS entity body while capping DoS-adjacent scenarios where a producer submits multi-MB payloads that would inflate log lines, DB rows, and memory pressure. Configurable in a future revision if the CMS emits larger legitimate bodies.
-- Schema-level sanitization (e.g., HTML stripping, allow-listed fields) is deliberately NOT applied — the spec declares the payload opaque and the service does not render it.
+- Schema-level sanitization (e.g., HTML stripping, allow-listed fields) is deliberately NOT applied — the spec declares the payload opaque and the service does not render it. If a downstream consumer renders user-generated payload content, sanitization belongs at the presentation layer, not here — a persistence-only service that pre-sanitizes couples itself to consumer requirements it does not own.
 
 Validation failure → permanent failure with `validation_error` reason.
 
@@ -830,9 +834,30 @@ Scheme name: `"Basic"`. BCrypt work factor: 11 (default of `BCrypt.Net-Next`).
 - Single Role column limits users to one role; RBAC migration required if multi-role emerges.
 - BCrypt.Verify per request has non-trivial CPU cost — future mitigation: cache authenticated principals if throughput becomes concern.
 
+### Data confidentiality story
+
+The spec states that CMS data is confidential and must not be served publicly, and directs us to assume all data is restricted. This ADR governs the **application-layer** answer to that requirement; transport and at-rest concerns are enforced at the deployment layer.
+
+| Layer | Protection | Where enforced |
+|-------|------------|----------------|
+| Passwords | BCrypt work factor 11 (`BasicAuthenticationHandler` → `BCrypt.Verify`) | Application code |
+| Credentials in transit | HTTPS / TLS termination at the reverse proxy or load balancer | Deployment (see `architecture.md` § Deployment) |
+| Endpoint authentication | Every endpoint has `.RequireAuthorization(...)` — 401 without a valid Basic Auth header | Application code |
+| Role-based authorization | `OrganizationOnly` / `UserOrAdmin` / `AdminOnly` policies gate access; 403 on wrong role | Application code |
+| Row-level filtering | Reader query filters `Status = Published AND !IsDisabled` for non-admin roles (ADR-007) | Application code |
+| Data at rest | SQL Server Transparent Data Encryption (TDE) at the database configuration level | Deployment (DBA / IaC) |
+| Payload contents | Stored verbatim as opaque JSON (ADR-008); no field-level encryption in this service | Not applied here (see below) |
+
+**Field-level payload encryption is deliberately NOT applied.** The payload is opaque per spec (ADR-008) and this service is persistence-only — it does not render, display, or transmit the payload beyond the authenticated `GET /entities/{id}` response. If a downstream consumer displays user-generated payload content or forwards it to a third party, the encryption / redaction boundary belongs there, not here. Encrypting at persistence coupling the service to consumer requirements it does not own, and would make search / query paths harder without solving a spec-defined problem.
+
+**HTTPS is not enforced via `UseHttpsRedirection` in application code.** In production the service is expected to run behind a reverse proxy or load balancer that terminates TLS; enabling `UseHttpsRedirection` in the app when it is already fronted by such a component creates redirect loops when `X-Forwarded-Proto` is misconfigured, and forwarding-header trust must be configured explicitly. Consequence: for local `dotnet run` the developer can reach the API over plain HTTP, but any real deployment MUST terminate TLS at the edge. Documented in `architecture.md` § Deployment.
+
+**Multi-tenant / per-user data isolation is NOT implemented** — the spec asks for distinct users but does not describe tenants. All non-admin users see the same filtered view (Published + not-disabled). If a tenancy dimension emerges later, add a `TenantId` column on `Entity`, plumb it through the query layer, and expand the authorization policy set. Deferred as `future-improvements.md` #17 if that trigger arrives.
+
 ### Related ADRs
 
 - ADR-007 (Local Disabled Flag) — consumes role identification for filtering and endpoint authorization.
+- ADR-008 (Sync Batch Processing) — payload opacity assumption feeds the field-level-encryption decision here.
 - ADR-010 (Reader/Writer DbContext) — auth middleware reads Users via ReaderDbContext.
 - ADR-012 (Secret Management) — details password/config storage in Key Vault.
 - ADR-016 (Testing Strategy) — auth tests with valid/invalid credentials per spec item 7.

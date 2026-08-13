@@ -258,3 +258,17 @@ Companion documents:
 **Design sketch**: Add a `RowVersion byte[]` (SQL `rowversion`) column on `Entity`; EF Core `IsRowVersion()` in `EntityConfiguration`. In `EntityRepository.SaveChangesAsync`, catch `DbUpdateConcurrencyException`, re-read the entity, re-evaluate the incoming event against the fresh state via `Entity.EvaluateForApply`/`EvaluateForDelete`, and either re-apply (bounded retry) or fall through to the correct skip/failure outcome. Add an integration test that fires two concurrent `Task.WhenAll` updates against the same id and asserts the winner + the re-read outcome for the loser.
 
 **Related ADRs**: ADR-005, ADR-008, ADR-010.
+
+---
+
+## 17. Multi-tenant data isolation
+
+**Context**: The spec asks for distinct users (CMS vs consumer) but does not describe tenants. Today all non-admin authenticated users see the same filtered view (Published + not-disabled). If the CMS grows to serve multiple customer organizations from the same instance, users of tenant A should not see entities of tenant B — regardless of publish/disable state.
+
+**Why not now**: Spec silent on tenancy. Building it preemptively means guessing at the tenant boundary (per-organization, per-content-space, per-brand) and locking those assumptions into schema and query layers before evidence.
+
+**Trigger**: The CMS declares (or a consumer requests) that entities carry a tenant / organization / customer / workspace identifier that partitions visibility.
+
+**Design sketch**: Add a `TenantId` column on `Entity` populated from the incoming event (either a new field on `CmsEventEnvelope` or derived from the authenticated principal's tenant claim). Extend `IEntityQueries` methods with a `tenantId` parameter and add it to every `WHERE` clause. Expand `AuthOptions` and `UserSeeder` to carry per-user tenant assignments. Admin role either remains cross-tenant (system administrator) or is scoped per tenant depending on operational preference — that decision needs its own ADR when the trigger fires.
+
+**Related ADRs**: ADR-011 § Data confidentiality story documents the current no-tenancy stance; ADR-007 for the query filter layer that would need extension.
